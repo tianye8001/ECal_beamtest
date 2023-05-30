@@ -1,0 +1,2213 @@
+/*
+Author : Rakitha Beminiwattha, rakithab@jlab.org
+Wed Jun 29 12:58:25 EDT 2016
+file name : ecal_energy_res.cc
+
+This is the first script to access GEMC based ECAL. Ultimate goal is to get energy resolution for ECAL
+
+to run,
+./ecal_energy_res 
+
+It is problematic to access Trees with std::vector data in it using TChain. The issues fixed by following the thread discussion at, https://root.cern.ch/phpBB3/viewtopic.php?t=4939
+
+*/
+
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <iostream>
+#include <fstream>
+#include <new>
+#include <cstdlib>
+#include <math.h>
+#include "THnSparse.h"
+#include <TRandom.h>
+#include <TRandom3.h>
+#include <TApplication.h>
+#include <TSystem.h>
+
+#include <TH2F.h>
+#include <TTree.h>
+#include <TF1.h>
+#include <TProfile.h>
+#include <Rtypes.h>
+#include <TROOT.h>
+#include <TFile.h>
+#include <TChain.h>
+#include <TString.h> 
+#include <TDatime.h>
+#include <TStopwatch.h>
+#include <stdexcept>
+#include <time.h>
+#include <cstdio>
+#include <map>
+#include <cassert>
+
+#include <TMath.h>
+#include <TStyle.h>
+#include <TPaveStats.h>
+#include <TLorentzVector.h>
+#include <TCanvas.h>
+#include <TLine.h>
+#include <TGraph.h>
+#include <TMultiGraph.h>
+#include <TLegend.h>
+#include <TGraphErrors.h>
+#include <TFrame.h>
+#include <TObjArray.h>
+#include <TVector2.h>
+#include <TVirtualFitter.h>
+
+#include "ecal.h"
+
+#define __IO_MAXHIT 10000
+#define __OCTANTS 30
+Bool_t trigger_state_1[__OCTANTS]={kFALSE}; //octant level 6+1 blocks trigger state for the event
+Bool_t trigger_state_2[__OCTANTS]={kFALSE}; //octant level 2+1 blocks trigger state for the event
+Bool_t trigger_state_PS[__OCTANTS]={kFALSE};//if single event is above MIP then trigger state for the window will be true
+Bool_t trigger_state_3={kFALSE};
+Bool_t window_trigger_state_1=kFALSE;//trigger window level 6+1 blocks trigger state for the event
+Bool_t window_trigger_state_2=kFALSE;//trigger window level 2+1 blocks trigger state for the event
+Bool_t bDisableBkg=kFALSE;//disable background signal loading
+Bool_t bEarlyBeakBkg = kFALSE;//early break background loop
+Bool_t kSaveRootFile=kTRUE;
+const Double_t DEG=180./3.1415926;
+Double_t fTotalRate[3][5];
+const Double_t TriggerWindow = 30;// ns
+const Double_t DelayedHitTimeLimit = 50;// ns//or 30 ns was set before Tue Jun 23 11:02:34 EDT 2015
+//Generated input bank
+vector<Int_t> *fGen_pid=0;
+vector<Double_t> *fGen_Px=0;
+vector<Double_t> *fGen_Py=0;
+vector<Double_t> *fGen_Pz=0;
+vector<Double_t> *fGen_vx=0;
+vector<Double_t> *fGen_vy=0;
+vector<Double_t> *fGen_vz=0;
+Int_t fTimeWindow;
+TFile * rootfile;
+//FLUX bank
+vector<int> *fFluxHit_n=0;
+vector<int> *fFluxHit_id=0;
+vector<Int_t> *fFluxHit_tid=0;
+vector<Int_t> *fFluxHit_mtid=0;
+vector<Int_t> *fFluxHit_otid=0;
+vector<Int_t> *fFluxHit_pid=0;
+vector<Int_t> *fFluxHit_mpid=0;
+vector<Double_t> *fFluxHit_trackE=0;
+vector<Double_t> *fFluxHit_totEdep=0;
+vector<Double_t> *fFluxHit_Px=0;
+vector<Double_t> *fFluxHit_Py=0;
+vector<Double_t> *fFluxHit_Pz=0;
+vector<Double_t> *fFluxHit_T=0;
+vector<Double_t> *fFluxHit_Avg_x=0;
+vector<Double_t> *fFluxHit_Avg_y=0;
+vector<Double_t> *fFluxHit_Avg_z=0;
+vector<Double_t> *fFluxHit_Avg_lx=0;
+vector<Double_t> *fFluxHit_Avg_ly=0;
+vector<Double_t> *fFluxHit_Avg_lz=0;
+vector<Double_t> *fFluxHit_vx=0;
+vector<Double_t> *fFluxHit_vy=0;
+vector<Double_t> *fFluxHit_vz=0;
+vector<Double_t> *fFluxHit_mvx=0;
+vector<Double_t> *fFluxHit_mvy=0;
+vector<Double_t> *fFluxHit_mvz=0;
+vector<Double_t> *fFluxHit_Avg_t=0;
+Double_t edep_PS_sum[__OCTANTS]={0};
+TBranch *bFluxHit_id = 0;
+TBranch *bFluxHit_n = 0;
+TBranch *bFluxHit_pid = 0;
+TBranch *bFluxHit_mpid = 0;
+TBranch *bFluxHit_tid = 0;
+TBranch *bFluxHit_mtid = 0;
+TBranch *bFluxHit_otid = 0;
+TBranch *bFluxHit_trackE = 0;
+TBranch *bFluxHit_totEdep = 0;
+TBranch *bFluxHit_Avg_x = 0;
+TBranch *bFluxHit_Avg_y = 0;
+TBranch *bFluxHit_Avg_z = 0;
+TBranch *bFluxHit_Avg_lx = 0;
+TBranch *bFluxHit_Avg_ly = 0;
+TBranch *bFluxHit_Avg_lz = 0;
+TBranch *bFluxHit_Px = 0;
+TBranch *bFluxHit_Py = 0;
+TBranch *bFluxHit_Pz = 0;
+TBranch *bFluxHit_vx = 0;
+TBranch *bFluxHit_vy = 0;
+TBranch *bFluxHit_vz = 0;
+TBranch *bFluxHit_mvx = 0;
+TBranch *bFluxHit_mvy = 0;
+TBranch *bFluxHit_mvz = 0;
+TBranch *bFluxHit_t = 0;
+
+TChain * TGEMC_Flux;
+Int_t rndTimeWindow;//to save the random number of the trigger window
+//EC bank
+vector<int> *fECHit_n=0;
+vector<int> *fECHit_id=0;
+vector<Int_t> *fECHit_tid=0;
+vector<Int_t> *fECHit_mtid=0;
+vector<Int_t> *fECHit_otid=0;
+vector<Int_t> *fECHit_pid=0;
+vector<Int_t> *fECHit_mpid=0;
+vector<Double_t> *fECHit_trackE=0;
+vector<Double_t> *fECHit_totEdep=0;
+vector<Double_t> *fECHit_totEdepB=0;
+vector<Double_t> *fECHit_totEend=0;
+vector<Double_t> *fECHit_Px=0;
+vector<Double_t> *fECHit_Py=0;
+vector<Double_t> *fECHit_Pz=0;
+vector<Double_t> *fECHit_Avg_x=0;
+vector<Double_t> *fECHit_Avg_y=0;
+vector<Double_t> *fECHit_Avg_z=0;
+vector<Double_t> *fECHit_Avg_lx=0;
+vector<Double_t> *fECHit_Avg_ly=0;
+vector<Double_t> *fECHit_Avg_lz=0;
+vector<Double_t> *fECHit_vx=0;
+vector<Double_t> *fECHit_vy=0;
+vector<Double_t> *fECHit_vz=0;
+vector<Double_t> *fECHit_mvx=0;
+vector<Double_t> *fECHit_mvy=0;
+vector<Double_t> *fECHit_mvz=0;
+vector<Double_t> *fECHit_Avg_t=0;
+
+TBranch *bECHit_id = 0;
+TBranch *bECHit_n = 0;
+TBranch *bECHit_pid = 0;
+TBranch *bECHit_mpid = 0;
+TBranch *bECHit_tid = 0;
+TBranch *bECHit_mtid = 0;
+TBranch *bECHit_otid = 0;
+TBranch *bECHit_trackE = 0;
+TBranch *bECHit_totEdep = 0;
+TBranch *bECHit_Avg_x = 0;
+TBranch *bECHit_Avg_y = 0;
+TBranch *bECHit_Avg_z = 0;
+TBranch *bECHit_Avg_lx = 0;
+TBranch *bECHit_Avg_ly = 0;
+TBranch *bECHit_Avg_lz = 0;
+TBranch *bECHit_Px = 0;
+TBranch *bECHit_Py = 0;
+TBranch *bECHit_Pz = 0;
+TBranch *bECHit_vx = 0;
+TBranch *bECHit_vy = 0;
+TBranch *bECHit_vz = 0;
+TBranch *bECHit_mvx = 0;
+TBranch *bECHit_mvy = 0;
+TBranch *bECHit_mvz = 0;
+TBranch *bECHit_t = 0;
+vector<int> *fECPSHit_n=0;
+vector<int> *fECPSHit_id=0;
+vector<Int_t> *fECPSHit_tid=0;
+vector<Int_t> *fECPSHit_mtid=0;
+vector<Int_t> *fECPSHit_otid=0;
+vector<Int_t> *fECPSHit_pid=0;
+vector<Int_t> *fECPSHit_mpid=0;
+vector<Double_t> *fECPSHit_trackE=0;
+vector<Double_t> *fECPSHit_totEdep=0;
+vector<Double_t> *fECPSHit_totEdepB=0;
+vector<Double_t> *fECPSHit_totEend=0;
+vector<Double_t> *fECPSHit_Px=0;
+vector<Double_t> *fECPSHit_Py=0;
+vector<Double_t> *fECPSHit_Pz=0;
+vector<Double_t> *fECPSHit_Avg_x=0;
+vector<Double_t> *fECPSHit_Avg_y=0;
+vector<Double_t> *fECPSHit_Avg_z=0;
+vector<Double_t> *fECPSHit_Avg_lx=0;
+vector<Double_t> *fECPSHit_Avg_ly=0;
+vector<Double_t> *fECPSHit_Avg_lz=0;
+vector<Double_t> *fECPSHit_vx=0;
+vector<Double_t> *fECPSHit_vy=0;
+vector<Double_t> *fECPSHit_vz=0;
+vector<Double_t> *fECPSHit_mvx=0;
+vector<Double_t> *fECPSHit_mvy=0;
+vector<Double_t> *fECPSHit_mvz=0;
+vector<Double_t> *fECPSHit_Avg_t=0;
+   vector<double>  *userVar001;
+   vector<double>  *userVar002;
+   vector<double>  *userVar003;
+   vector<double>  *userVar004;
+   vector<double>  *userVar005;
+   vector<double>  *userVar006;
+   vector<double>  *userVar007;
+   vector<double>  *userVar008;
+   vector<double>  *userVar009;
+   vector<double>  *userVar010;
+   TBranch        *b_userVar001;   //!
+   TBranch        *b_userVar002;   //!
+   TBranch        *b_userVar003;   //!
+   TBranch        *b_userVar004;   //!
+   TBranch        *b_userVar005;   //!
+   TBranch        *b_userVar006;   //!
+   TBranch        *b_userVar007;   //!
+   TBranch        *b_userVar008;   //!
+   TBranch        *b_userVar009;   //!
+   TBranch        *b_userVar010;   //!
+Int_t fEv_simpid;
+Double_t fEvTimeStamp;
+Int_t fEvTimeWindow;
+TChain * TGEMC_EC;
+Bool_t kSaveCanvas=kTRUE;
+
+Int_t pid_gen=0;
+Double_t theta_gen=0,phi_gen=0,p_gen=0,E_gen,px_gen=0,py_gen=0,pz_gen=0,vx_gen=0,vy_gen=0,vz_gen=0;
+Int_t FluxHit_detector_ID,FluxHit_subdetector_ID,FluxHit_subsubdetector_ID,FluxHit_component_ID;
+Int_t ECHit_detector_ID,ECHit_subdetector_ID,ECHit_subsubdetector_ID,ECHit_component_ID;
+Int_t ECPSHit_detector_ID,ECPSHit_subdetector_ID,ECPSHit_subsubdetector_ID,ECPSHit_component_ID;
+//1sigma cut
+Double_t trig_thresh_2p1[8] = {501.5 ,471.9 ,412.8 ,340.5 };//{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 ,0.0  };//not in use
+Double_t trig_thresh_PS[8] = {0.0, 0.0, 0.0, 0.0,0.0,0.0};//{20.9 ,28.2 ,28.3 ,27.7 ,27.5 ,29.0 ,31.7 ,17.7};//{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 ,0.0  };//not in use
+Double_t trig_thresh_PS_6p1[8] = {0.0, 0.0, 0.0, 0.0,0.0,0.0};//{20.9 ,28.2 ,28.3 ,27.7 ,27.5 ,29.0 ,31.7 ,17.7 };//{126.6 ,128.7 ,123.6 ,124.4 ,124.1 ,125.0 ,126.4 ,119.7};////Using 6p1 cluster sum as total PS sum threshold
+Double_t trig_thresh_PS_2p1[8] = {0.0, 0.0, 0.0, 0.0,0.0,0.0};//{121.9 ,120.8 ,115.0 ,115.3 ,116.4 ,116.3 ,117.5 ,131.4};
+Double_t trig_low_R[8]={110.0 ,130.0 ,150.0 ,170.0 ,190.0 ,210.0 ,230.0 ,250.0};
+Double_t trig_high_R[8]={130.0 ,150.0 ,170.0 ,190.0 ,210.0 ,230.0 ,270.0 ,270.0};
+//Double_t trig_thresh_6p1[8] = {617.9 ,531.0 ,460.0 ,389.8 ,331.0 ,310.0,310.0 ,272.0};
+//1sigma cut
+//Double_t trig_thresh_6p1[8] = {438.663,363.175,308.067,262.477,205.240,173.358,151.591,121.662};
+//1sigma cut
+Double_t trig_thresh_6p1[8] = {438.663,363.175,308.067,262.477,205.240,210,210,210};
+
+//routine to load ecal block id,coordinates, and sector information
+void LoadEC_map(TString map_file);
+//routine to return ecal block x,y
+TVector2 GetECALBlock_coord(Int_t block_id);
+Int_t GetECALBlock_sector(Int_t block_id);
+//return an pointer to energy deposit for 6 neighboring ecal blocks
+Int_t GetECALCluser(Int_t block_id,Int_t *cluster_edep_blockid);
+//Int_t GetECALCluser(Double_t hit_x, Double_t hit_y, Int_t *cluster_edep_blockid);
+//save x,y,id and sectors and status for which moudles are active only for SIDIS case
+Int_t sector[54][50]={{100000}};    //the structure is the same as x[54][50], y[54][50]   54 is the number of y rows
+Int_t id[54][50]={{100000}};    //the structure is the same as x[54][50], y[54][50]   54 is the number of y rows
+Int_t num_module_in_row[54]={0};
+Double_t y_bak[54]={100000};
+Double_t x[54][50]={{100000}};           
+Double_t y[54][50]={{100000}}; 
+Int_t status[54][50]={{100000}};    //the structure is the same as x[54][50], y[54][50]   54 is the number of y rows
+std::pair<Int_t,Int_t> block_map[2000];
+Int_t GetRadiusIndex(Double_t radius);
+Double_t GetThreshold6p1(Double_t radius);
+Double_t Calfactor(Double_t edep);
+//routines for properly access vector based TTree using TChain
+void SetFluxBranchAddresses();
+void GetFluxEntryByBranch(Long64_t local);
+
+void SetECBranchAddresses();
+void GetECEntryByBranch(Long64_t local);
+Double_t edep_6p1_max1[__OCTANTS]={0};
+Double_t radius_6p1_max1[__OCTANTS]={0};
+Double_t edep_6p1_preshower_max1[__OCTANTS]={0};
+Double_t radius_6p1_preshower_max1[__OCTANTS]={0};
+
+Double_t edep_6p1_x[__OCTANTS]={0};
+Double_t edep_6p1_y[__OCTANTS]={0};
+Double_t edep_6p1_x_preshower[__OCTANTS]={0};
+Double_t edep_6p1_y_preshower[__OCTANTS]={0};
+//get energy resolution
+TGraphErrors * GetRMSReolution(TH2F * Difference);
+struct event {
+  Int_t pid;
+  Double_t x;
+  Double_t y;
+  Double_t pf; 
+  //  Double_t hit_time; 
+  Int_t blockID;
+};
+
+struct trigger_event {
+  TString pid;
+  Double_t pf;  
+  Double_t r;
+  Double_t x;
+  Double_t y;
+};
+
+struct ecal_event {
+  Double_t edep;  
+  Double_t r;
+  Double_t x;
+  Double_t y;
+};
+
+Bool_t bEarlyBeak = kFALSE;//kTRUE;
+vector< vector<trigger_event> > event_summary;
+vector< vector<ecal_event> > ecal_summary;
+trigger_event trigger_event1;
+ecal_event ecal_event1;
+using namespace std;
+using namespace std::tr1;
+void LoadBackgrounds();
+void getBkgEdepPS(Int_t rndnum);//this routine will fill ecalPSMap with background signals
+void getBkgEdepSh(Int_t rndnum);//this routine will fill ecalShMap with background signals
+vector<std::map<Int_t,Double_t> >total_ecalShMap;
+vector<std::map<Int_t,Double_t> > total_ecalPSMap;
+vector<std::map<Int_t,Double_t> >total_ecalShMapbkg;
+vector<std::map<Int_t,Double_t> > total_ecalPSMapbkg;
+std::map<Int_t,Double_t> ecalPSMap;//map for pre-shower
+std::map<Int_t,Double_t> ecalShMap;//map for shower
+std::map<Int_t,Double_t> ecalPSMapbkg;//map for pre-shower
+std::map<Int_t,Double_t> ecalShMapbkg;//map for shower
+void set_plot_style();
+
+std::map<int,int> pidmap;
+vector<event> event_list;//use this to store events in a single time window
+
+  double  fiducialA(double E){
+//2x0 3sigma
+//  double  fidA= -0.00185116*TMath::Power(E,2)+0.0311822*E+0.825159;
+//double  fidA= -0.0013648*TMath::Power(E,2)+0.0240263*E+0.844713;
+//double  fidA= -0.00190439*TMath::Power(E,2)+0.031885*E+0.808954;
+//double  fidA= -0.00224052*TMath::Power(E,2)+0.0374833*E+0.774947;
+//double  fidA= -0.00730009*TMath::Power(E,2)+0.0864172*E+0.668363;
+// 2.5sigma
+//double  fidA= -0.00138613*TMath::Power(E,2)+0.0259125*E+0.840818;
+// 3sigma no rod
+//double  fidA= -0.002034*TMath::Power(E,2)+0.0347763*E+0.788338;
+// 3sigma 6mm rod
+//double  fidA= -0.00152128*TMath::Power(E,2)+0.0279126*E+0.768922;
+// 2.5sigma 6mm rod
+//double  fidA= -0.00154558*TMath::Power(E,2)+0.0286231*E+0.770313;
+// 2sigma 6mm rod
+//double  fidA= -0.00131561*TMath::Power(E,2)+0.0243711*E+0.803959;
+// 3.5sigma 6mm rod
+//double  fidA= -0.00203553*TMath::Power(E,2)+0.0319246*E+0.666312;
+//smear
+//double  fidA= -0.00281372*TMath::Power(E,2)+0.0470171*E+0.572116;
+//11GeV +bkg
+//double  fidA= -0.0026032*TMath::Power(E,2)+0.0458901*E+0.557977;
+//11GeV nobkg
+
+double  fidA= -0.00173969*TMath::Power(E,2)+0.0282502*E+0.735108;
+//6.6 GeV
+//double  fidA= -0.00499927*TMath::Power(E,2)+0.062405*E+0.653266;
+
+// 4.5sigma 6mm rod
+//double  fidA= -0.00246531*TMath::Power(E,2)+0.0386074*E+0.586409;
+// 2sigma 8mm rod
+//double  fidA= -0.00196038*TMath::Power(E,2)+0.032281*E+0.776824;
+
+
+
+// 3sigma 6mm rod
+//double  fidA= -0.00144103*TMath::Power(E,2)+0.0282871*E+0.770346;
+// 3sigma 8mm rod
+//double  fidA= -0.000865155*TMath::Power(E,2)+0.0162081*E+0.788756;
+// 3sigma 8mm rodi 6p1
+//double  fidA= -0.00385067*TMath::Power(E,2)+0.0621286*E+0.677454;
+// 3sigma 6mm rod 6p1
+//double  fidA= -0.00324156*TMath::Power(E,2)+0.0520273*E+0.722771;
+//2x0 2sigma
+//double  fidA= -0.00116452*TMath::Power(E,2)+0.0197062*E+0.878658;
+// 2.5sigma
+//double  fidA= -0.00165078*TMath::Power(E,2)+0.0275501*E+0.836796;
+//double  fidA= -0.000707861*TMath::Power(E,2)+0.0140428*E+0.882387;
+
+
+//double  fidA= -0.000864828*TMath::Power(E,2)+0.0163751*E+0.895324;
+//bkg 2sigma
+//double  fidA= -0.00111568*TMath::Power(E,2)+0.0200016*E+0.852103;
+
+//2X0 noAl 2sigma
+//double  fidA= -0.00127154*TMath::Power(E,2)+0.0215037*E+0.877808;
+//2x0 noAl 3sigma
+//double  fidA= -0.00168244*TMath::Power(E,2)+0.0286233*E+0.829827;
+//2x0 2sigma E0 calibrate
+//double  fidA= -0.00129615*TMath::Power(E,2)+0.0218633*E+0.850059;
+//2x0 3sigma E0 calibrate
+//double  fidA= -0.00176076*TMath::Power(E,2)+0.0299327*E+0.797558;
+//no prelead
+//3sigma
+//double  fidA= -0.000654894*TMath::Power(E,2)+0.0116817*E+0.896715;
+//1.5X0 3sigma
+//double  fidA= -0.00150420*TMath::Power(E,2)+0.0254538*E+0.845325;
+//1X0 3sigma
+//double  fidA= -0.00124423*TMath::Power(E,2)+0.0208254*E+0.866203;
+//0.5X0 3sigma
+//double  fidA= -0.000702179*TMath::Power(E,2)+0.0125572*E+0.896144;
+//2.1X0 3sigma
+//double  fidA= -0.00193289*TMath::Power(E,2)+0.0335147*E+0.803980;
+//2.5X0 3sigma
+//double  fidA= -0.00242110*TMath::Power(E,2)+0.0420997*E+0.760604;
+//2.5x0 2sigma
+//double  fidA= -0.00184217*TMath::Power(E,2)+0.0319399*E+0.825114;
+//  183X0
+//  3sigma
+//double  fidA= -0.00179666*TMath::Power(E,2)+0.0312151*E+0.817591;
+//2sigma
+//double  fidA= -0.000998273*TMath::Power(E,2)+0.0193201*E+0.869979;
+//3X0
+//3sigma
+//double  fidA= -0.00296213*TMath::Power(E,2)+0.0530064*E+0.695278;
+//2sigma
+//double  fidA= -0.00227303*TMath::Power(E,2)+0.0405696*E+0.775295;
+//05X0
+//double  fidA= -0.000832675*TMath::Power(E,2)+0.0140602*E+0.891343;
+//15x0
+//double  fidA= -0.00105884*TMath::Power(E,2)+0.0190193*E+0.874677;
+//4X0 2sigma 
+//double  fidA= -0.00359858*TMath::Power(E,2)+0.0652425*E+0.632070;
+   return fidA;
+      
+     }
+  double  fiducialB(double E){
+  //1.5sigma
+  //double  fidB= -0.000396516*TMath::Power(E,2)+0.00675309*E-0.00992728;
+  //background 1.5sigma
+  // double fidB =-0.000121284*TMath::Power(E,2)+0.0034838*E+0.00223049;
+   //double fidB =-0.000337771*TMath::Power(E,2)+0.00653901*E+0.00141844;
+   //double fidB =0.000393246*TMath::Power(E,2)-0.00521707*E+0.0336038;
+   //double fidB =-4.08705e-05*TMath::Power(E,2)+0.00146521*E+0.0059027;
+   double  fidB= -0.00173969*TMath::Power(E,2)+0.0282502*E+0.705108;
+   return fidB;
+     }
+
+  double  fiducialC(double E){
+ // double  fidC= 0.00118405*TMath::Power(E,2)-0.0209216*E+1.15238;
+//double  fidC= 0.0028189*TMath::Power(E,2)-0.0343965*E+1.18882;
+//no rod 3sigma
+//double  fidC= 0.00087634*TMath::Power(E,2)-0.0154761*E+1.12356;
+//no rod 3.5sigma
+//double  fidC= 0.00110812*TMath::Power(E,2)-0.0195326*E+1.15091;
+//6mm rod 3.5sigma
+//depB 
+//double  fidC= 0.00121407*TMath::Power(E,2)-0.0224019*E+1.17407;
+//Eend 
+double  fidC= 0.000947165*TMath::Power(E,2)-0.0160743*E+1.15714;
+
+//8mm rod 3.5sigma
+//double  fidC= 0.00107587*TMath::Power(E,2)-0.0184161*E+1.13362;
+//6mm 3sigma
+//double  fidC= 0.000687889*TMath::Power(E,2)-0.0125608*E+1.10589;
+//8mm 3sigma
+//double  fidC= 0.00044532*TMath::Power(E,2)-0.00810627*E+1.08592;
+//8mm 3sigma 6p1
+//double  fidC= 0.00117312*TMath::Power(E,2)-0.0195833*E+1.15146;
+//6mm 3sigma 6p1
+//double  fidC= 0.00120511*TMath::Power(E,2)-0.0197874*E+1.15735;
+  //2.5sigma
+  //double  fidC= 0.000885347*TMath::Power(E,2)-0.015799*E+1.11522;
+  //double  fidC= -5.7567e-05*TMath::Power(E,2)-0.00229167*E+1.06963;
+   return fidC;
+     }
+int main(Int_t argc,Char_t* argv[]) { 
+  //set the timer
+  TStopwatch watch;
+  watch.Start();
+  
+  
+  TVirtualFitter::SetDefaultFitter("Minuit2");
+  
+  TApplication theApp("App",&argc,argv);
+  gROOT->SetStyle("Plain");
+  gStyle->SetOptStat("eMr");
+  gStyle->SetOptFit();
+  set_plot_style();
+  
+  Int_t pid_ec;
+  
+  //bin resolution for histograms
+  Int_t mom_bins = 100;
+  //pid map to access histograms pid=0 is returned when invalid pid is passed
+  pidmap[11]=1;
+  pidmap[-211]=2;
+  pidmap[22]=3;
+  pidmap[-11]=4;
+  pidmap[211]=5;  
+   //TString rootfilename="PVDIS_bggen_pim_bkg_right_6blockpreshower_efficency_6p1_rod6mm_L35sigma_Edepend_smear_finerbin.root";
+   TString rootfilename="PVDIS_eAll_bkg_right_6blockpreshower_efficency_6p1_rod6mm_L35sigma_Edepend_smear_finerbin_preE015_11GeV_full_radius_precut_looser_thetacut.root";
+   //TString rootfilename="PVDIS_even_pim_pimbkg_right_6blockpreshower_efficency_6p1_rod6mm_L35sigma_Edepend_smear_tid1_thetacut_finerbin_preE015_6.6GeV.root"; 
+  //TString rootfilename="PVDIS_eAll_EC_bkg_right_1blockpreshower_efficency_rodtest_3sigma_6p1.root";
+  if (kSaveRootFile){
+    TString rootfilestatus="RECREATE";
+    rootfile = new TFile(rootfilename, rootfilestatus);
+    rootfile->cd();
+  }
+ 
+ TGraphErrors *gr;
+  TGraphErrors *gr1;
+  TGraphErrors *gr2;
+  TGraphErrors *grH;
+  char the_filename[200];
+  TH2F *Eoverp_vs_p_radius[9];
+  TH2F *Eoverp_vs_pe_radius[9];
+   THnSparseF *Qsq_x_Theta_p_hist;
+   THnSparseF *Qsq_x_Theta_p_precut_hist[13];
+  THnSparseF *Qsq_x_Theta_p_cut_hist;
+   THnSparseF *Qsq_x_Theta_p_nobkg_hist;
+   THnSparseF *Qsq_x_Theta_p_precut_nobkg_hist[13];
+  THnSparseF *Qsq_x_Theta_p_cut_nobkg_hist;
+  TH1F *histo_edep_Sh_radius_nothreshold[9];
+  TH1F *histo_edep_Sh_radius_nothreshold_nobkg[9];
+  //int bins[5] = {11,5,15,24,100};
+  //double xmin1[5] = {1,0,15,1,0};
+  //double xmax1[5] = {12,1,45,7,3};                       
+  /*int bins[6] = {11,5,22,6,8,100};
+  double xmin1[6] = {1,0,18,1,-0.5,0};
+  double xmax1[6] = {12,1,40,7,7.5,3};*/                       
+  //int bins[7] = {11,5,22,6,8,100,50};
+ // double xmin1[7] = {1,0,18,1,-0.5,0,0};
+ // double xmax1[7] = {12,1,40,7,7.5,3,1};                       
+  int bins[8] = {11,5,22,6,8,440,800,440};
+  double xmin1[8] = {1,0,18,1,-0.5,0,0,0};
+  double xmax1[8] = {12,1,40,7,7.5,11,2,11};                       
+  Qsq_x_Theta_p_hist = new THnSparseF("Qsq_x_Theta_p_hist","Qsq_x_Theta_p_hist",8,bins,xmin1,xmax1);
+  Qsq_x_Theta_p_hist->Sumw2();
+  Qsq_x_Theta_p_nobkg_hist = new THnSparseF("Qsq_x_Theta_p_nobkg_hist","Qsq_x_Theta_p_nobkg_hist",8,bins,xmin1,xmax1);
+  Qsq_x_Theta_p_nobkg_hist->Sumw2();
+  //Qsq_x_Theta_p_precut_hist = new THnSparseF("Qsq_x_Theta_p_precut_hist","Qsq_x_Theta_p_precut_hist",7,bins,xmin1,xmax1);
+  //Qsq_x_Theta_p_precut_hist->Sumw2();
+  for(int k=0;k<13;k++){
+  Qsq_x_Theta_p_precut_hist[k] = new THnSparseF(Form("Qsq_x_Theta_p_precut%d_hist",k),Form("Qsq_x_Theta_p_precut%d_hist",k),8,bins,xmin1,xmax1);
+  Qsq_x_Theta_p_precut_hist[k]->Sumw2();
+  Qsq_x_Theta_p_precut_nobkg_hist[k] = new THnSparseF(Form("Qsq_x_Theta_p_precut%d_nobkg_hist",k),Form("Qsq_x_Theta_p_precut%d_nobkg_hist",k),8,bins,xmin1,xmax1);
+  Qsq_x_Theta_p_precut_nobkg_hist[k]->Sumw2();
+  }
+  Qsq_x_Theta_p_cut_hist = new THnSparseF("Qsq_x_Theta_p_cut_hist","Qsq_x_Theta_p_cut_hist",8,bins,xmin1,xmax1);
+  Qsq_x_Theta_p_cut_hist->Sumw2();
+  Qsq_x_Theta_p_cut_nobkg_hist = new THnSparseF("Qsq_x_Theta_p_cut_nobkg_hist","Qsq_x_Theta_p_cut_nobkg_hist",8,bins,xmin1,xmax1);
+  Qsq_x_Theta_p_cut_nobkg_hist->Sumw2();
+  TH2F *preshower_Cali=new TH2F("preshower_Cali",";CaliEdep_tot/p;CalEdep_preshower (GeV)",600,0,2.5,100,0,1);
+  TH2F *preshower_Cali2=new TH2F("preshower_Cali2",";CaliEdep_tot/p;CalEdep_preshower (GeV)",120,0,2.5,100,0,1);
+  TH2F *preshower_vs_p=new TH2F("preshower_vs_p",";p(GeV/c);Preshower (GeV)",1200,0,12,200,0,1);
+  TH2F *Eoverp_vs_p=new TH2F("Eoverp_vs_p",";p(GeV);E/p",1200,0,12,100,0,2.5);
+  TH2F *preshower_Calie=new TH2F("preshower_Calie",";CaliEdep_tot/p;CalEdep_preshower (GeV)",600,0,2.5,100,0,1);
+  TH2F *preshower_vs_pe=new TH2F("preshower_vs_pe",";p (GeV/c);Preshower (GeV)",1200,0,12,200,0,1);
+  TH2F *Eoverp_vs_pe=new TH2F("Eoverp_vs_pe",";p (GeV/c);E/p",1200,0,12,100,0,2.5);
+  TH1F *Eoverpcut_Eff=new TH1F("Eoverpcut_Eff",";p (GeV/c);E/p cut Efficiency",6,1,7);
+  TH2F *Preshower_vs_Shower_raw=new TH2F("prescin_vs_scin",";Edep_{scin}(MeV);Edep_{prescin} (MeV)",500,0,1000,250,0,200);
+  TH2F *Preshower_vs_prescin=new TH2F("preshower_vs_prescin",";Edep_{scin}(MeV);preshower(prescin+lead+Al)(MeV)",500,0,250,500,0,1000);
+  TH2F *Theta_vs_p = new TH2F("Theta_vs_p","Theta_vs_p",30,15,45,30,1,7);
+  TH2F *Theta_vs_p_cut = new TH2F("Theta_vs_p_cut","Theta_vs_p_cut",30,15,45,30,1,7);
+  TH2F *Theta_vs_p_threshold = new TH2F("Theta_vs_p_threshold","Theta_vs_p_threshold",30,15,45,30,1,7);
+  TH2F *Theta_vs_p_cut_threshold = new TH2F("Theta_vs_p_cut_threshold","Theta_vs_p_cut_threshold",30,15,45,30,1,7);
+  TH2F *fluxp_vs_R=new TH2F("fluxp_vs_R",";R [cm]; p [GeV/c]",240,100,220,100,1,11);
+  TH2F *E_vs_R=new TH2F("E_vs_R",";R [cm]; E [GeV]",240,100,220,100,1,11);
+  //TH2F *Ein_vs_Eout=new TH2F("Ein_vs_Eout",";E_{in} [GeV]; E_{out} [GeV]",1000,0,2000,1000,0,2000);
+  TH1F *Eoverp_hist_bin[11];
+  TH1F *Edep_hist_radius[9];
+  TH1F *Eoverp_hist_cut_bin[11];
+  TH1F *PreE_hist_bin[11];
+  TH1F *PreE_hist_cut_bin[11];
+  TH1F *PreE_hist_Rbin[9];
+  TH1F *PreE_hist_cut_Rbin[9];
+  for(int bin=0;bin<11;bin++){
+    Eoverp_hist_bin[bin]=new TH1F(Form("Eoverp_pbin%d",bin),Form("Eoverp_pbin%d",bin),600,0,2.5);
+    Eoverp_hist_cut_bin[bin]=new TH1F(Form("Eoverp_cut_pbin%d",bin),Form("Eoverp_cut_pbin%d",bin),600,0,2.5);
+    
+    PreE_hist_bin[bin]=new TH1F(Form("PreE_pbin%d",bin),Form("PreE_pbin%d",bin),800,0,400);
+    PreE_hist_cut_bin[bin]=new TH1F(Form("PreE_cut_pbin%d",bin),Form("PreE_cut_pbin%d",bin),800,0,400);
+  }
+  for(int i=0;i<9;i++){
+  Edep_hist_radius[i]=new TH1F(Form("Edep_Rbin%d",i),"Edep; E6p1_shower(GeV)",500,0,3000);
+  Eoverp_vs_p_radius[i]=new TH2F(Form("Eoverp_vs_p_Rbin%d",i),";p (GeV); E/p",1200,0,12,100,0,2.5);
+  Eoverp_vs_pe_radius[i]=new TH2F(Form("Eoverp_vs_p_cut_Rbin%d",i),";p (GeV); E/p",1200,0,12,100,0,2.5);
+        histo_edep_Sh_radius_nothreshold[i]  = new TH1F(Form("histo_edep_Sh_radius_nothreshold_%d",i),Form("PShower_6p1E_R_%d",i),600,0,300);
+        histo_edep_Sh_radius_nothreshold_nobkg[i]  = new TH1F(Form("histo_edep_Sh_radius_nothreshold_nobkg_%d",i),Form("PShower_6p1E_R_nobkg%d",i),600,0,300);
+        histo_edep_Sh_radius_nothreshold[i]->GetXaxis()->SetTitle("E_pre [MeV]");
+        histo_edep_Sh_radius_nothreshold[i]->GetYaxis()->SetTitle("rate [Hz]");
+        histo_edep_Sh_radius_nothreshold_nobkg[i]->GetXaxis()->SetTitle("E_pre [MeV]");
+        histo_edep_Sh_radius_nothreshold_nobkg[i]->GetYaxis()->SetTitle("rate [Hz]");
+
+  }
+
+  for(int k=0;k<9;k++){
+    PreE_hist_Rbin[k]=new TH1F(Form("PreE_Rbin%d",k),Form("PreE_Rbin%d",k),800,0,400);
+    PreE_hist_cut_Rbin[k]=new TH1F(Form("PreE_cut_Rbin%d",k),Form("PreE_cut_Rbin%d",k),800,0,400);
+  }
+  
+  Double_t f_samp = 0.2429;
+  Double_t f_samp_PS = 5.353;//4.253;
+  double   f_samp_ps_con=30.7641;//35.7641;
+  
+  Double_t edep_1block_sum;//photon sum of the main ecal block
+  Double_t edep_1block_sum_preshower;//photon sum of the main ecal block
+ // Double_t f_samp2 =1.0/4.38112;//1.0/4.38112;//4.29453;//4.30316;//4.39188;//4.14784;//4.23838;//2X0_noA;//4.3208;//4x0//4.27835;//3x0//4.26266;//2.5x0//4.25198;//4.23692;//4.2379//1X0;//4.24269;//1.5X0//4.241;//2X0//4.2773;//1.83X0//4.241;//4.25948;//4.27596;//4.21945;//4.30743;//4.25948;//4.33;//4.28761;//4.26898;//4.28761;
+ // double   f_samp2_PS=4.92061;//4.92061;//5.50407;//5.69405;//5.43518;//4.25375;//3.87309;//2.72408;//2X0_noAl//8.34515;//4x0//6.37227;//3x0//5.56428;//2.5x0//4.98523;//3.02051;//3.52538;//1X0//4.16273;//1.5X0//4.93537;//2X0//4.10316;//1.83X0//4.93537;//5.31724;//4.20277;//3.52148;//4.48827;//5.31724;//4.535;//5.1145;//5.0198;//5.1145;
+  double   f_samp2_ps_con=0;//35.7641;
+//const double f_samp2 =1.0/(4.4494);
+//const double f_samp2_PS =5.42248;
+double   f_samp2 =1.0/(5.94936*1.15);
+ double   f_samp2_PS=5.65514*1.15;
+  //Energy resolution plots
+  Double_t EoverPElec_low_limit = 0;//0. for electron shower, -0.1 for pre shower//-2. for pions
+  Double_t EoverPElec_up_limit = 0.25;//0.5 for electronshower, 0.1 for pre shower//2. for pions
+  Double_t E_low_limit = 0;//0. for electron shower, -0.1 for pre shower//-2. for pions
+  Double_t E_up_limit = 0;//0.5 for electronshower, 0.1 for pre shower//2. for pions
+  EoverPElec_low_limit = 1.2;//0.90; defalut from remoll
+  EoverPElec_up_limit = 1.5;//1.05; defalut from remolloutputfile
+  E_low_limit = 1000;//0.90; defalut from remoll
+  E_up_limit = 12000;//1.05; defalut from remol
+  //sampling frac for lead
+  event single_event;//for GEM hits in a single time window
+  event_list.clear();//empty the event list vector
+  
+  if (!bDisableBkg)
+    LoadBackgrounds();
+  else
+    printf("Backgrounds are disabled! \n");
+  const int num=1;
+  TFile *file[num];
+  TTree *tree_header[num];
+  TTree *tree_generated[num];
+  TTree *TGEMC_EC[num];
+  TTree *TGEMC_Flux[num];
+  TTree *TGEMC_ECPS[num];
+  Int_t nentries[num];
+  //Flux bank
+  // TFile *file=new TFile("/volatile/halla/solid/tianye/solid_simulation/PVDIS_epiEffi/piPVDIS_prelead2x0_vacumm/output_total.root");
+  //TFile *file=new TFile("/cache/halla/solid/sim/solid_gemc/PVDIS_LD2_JLAB_VERSION_1.3/pass4/background_solid_PVDIS_LD2_dirty_weighted_eDIS_EC_filenum100_1e6.root");
+  //TFile *file=new TFile("/volatile/halla/solid/tianye/container/even_pim_EConly_vacuum_rod_6mm/even_pim_EConly_vacuum_rod_6mm_1e6.root");
+  //TFile *file=new TFile("/volatile/halla/solid/tianye/container/even_e_EConly_vacuum/even_e_EConly_vacuum_1e6.root");
+  //TFile *file=new TFile("/volatile/halla/solid/tianye/container/even_e_EConly_vacuum_rod_6mm/even_e_EConly_vacuum_rod_6mm_1e6.root");
+//  TFile *file=new TFile("/volatile/halla/solid/tianye/container/eAll_commited4fe_rod_6mm/eAll_commited4fe_rod_6mm_95files.root");
+  //bggen pim
+  /*file[0]=new TFile("/volatile/halla/solid/tianye/container/pimBggen_all_rod_6mm/pimBggen_all_rod_6mm_995files.root");
+  file[1]=new TFile("/volatile/halla/solid/tianye/container/pimBggen_all_rod_6mm_2/pimBggen_all_rod_6mm_2_991file.root");
+  file[2]=new TFile("/volatile/halla/solid/tianye/container/pimBggen_all_rod_6mm_3/pimBggen_all_rod_6mm_993files.root");
+  file[3]=new TFile("/volatile/halla/solid/tianye/container/pimBggen_all_rod_6mm_4/pimBggen_all_rod_6mm_4_838files.root");
+  file[4]=new TFile("/volatile/halla/solid/tianye/container/pimBggen_all_rod_6mm_5/pimBggen_all_rod_6mm_5_704files.root");
+  file[5]=new TFile("/volatile/halla/solid/tianye/container/pimBggen_all_rod_6mm_6/pimBggen_all_rod_6mm_6_696files.root");
+  file[6]=new TFile("/volatile/halla/solid/tianye/container/pimBggen_all_rod_6mm_7/pimBggen_all_rod_6mm_7_1162files.root");
+  file[7]=new TFile("/volatile/halla/solid/tianye/container/pimBggen_all_rod_6mm_8/pimBggen_all_rod_6mm_931files.root");
+  file[8]=new TFile("/volatile/halla/solid/tianye/container/pimBggen_all_rod_6mm_9/pimBggen_all_rod_6mm_879files.root");*/
+  //file[0]=new TFile("/volatile/halla/solid/tianye/container/even_e_EConly_vacuum_rod_6mm_6GeV/even_e_EConly_vacuum_rod_6mm_6GeV_1e6_100files.root");
+ // 6.6 GeV 
+// file[0]=new TFile("/volatile/halla/solid/tianye/container/even_pim_EConly_vacuum_rod_6mm_6GeV/even_pim_EConly_vacuum_rod_6mm_6GeV_1e6_100files.root");
+  //11GeV pim
+  //file[0]=new TFile("/cache/halla/solid/user/tianye/container/even_pim_EConly_vacuum_rod_6mm_2/even_pim_EConly_vacuum_rod_6mm_2_100files_1e6.root");
+  //file[0]=new TFile("/lustre19/expphy/volatile/halla/parity/yetian/SoLID/solid_PVDIS_LD2_moved_dirty_even_e_ECLGC_1e6_skim.root");
+  file[0]=new TFile("/volatile/halla/solid/tianye/container/farm_solid_PVDIS_LD2_moved_full_eAll_2.5/farm_solid_PVDIS_LD2_moved_full_eAll_filenum986_0.98e7.root");
+  //file[0]=new TFile("/lustre19/expphy/volatile/halla/parity/yetian/SoLID/solid_PVDIS_LD2_moved_dirty_even_e_ECLGC_1e6_skim.root");
+  //file[0]=new TFile("/volatile/halla/solid/tianye/container/even_pim_EConly_vacuum_rod_6mm_2/even_pim_EConly_vacuum_rod_6mm_200files_2e6.root");
+//  file[1]=new TFile("/volatile/halla/solid/tianye/container/even_pim_EConly_vacuum_rod_6mm_2/even_pim_EConly_vacuum_rod_6mm_200files_2e6.root");
+  //file[0]=new TFile("/cache/halla/solid/user/tianye/container/even_pim_EConly_vacuum_rod_6mm_2/even_pim_EConly_vacuum_rod_6mm_2_100files_1e6.root");
+//  file[0]=new TFile("/volatile/halla/solid/tianye/container/even_pim_EConly_vacuum_rod_6mm_6GeV/even_pim_EConly_vacuum_rod_6mm_6GeV_1e6_100files.root");
+ // file[0]=new TFile("/cache/halla/solid/user/tianye/container/even_e_EConly_vacuum_rod_6mm/even_e_EConly_vacuum_rod_6mm_1e6.root");
+// file[1]=new TFile("/cache/halla/solid/user/tianye/container/even_e_EConly_vacuum_rod_6mm_3/even_e_EConly_vacuum_rod_6mm_2_100files_1e6.root");
+// file[2]=new TFile("/volatile/halla/solid/tianye/container/even_e_EConly_vacuum_rod_6mm_2/even_e_EConly_vacuum_rod_6mm_3_100files_1e6.root");
+  //TFile *file=new TFile("/volatile/halla/solid/tianye/container/even_pim_EConly_vacuum_rod_6mm/even_pim_EConly_vacuum_rod_6mm_1e6.root");
+  //TFile *file=new TFile("/volatile/halla/solid/tianye/container/eAll_commited4fe_EC/farm_solid_PVDIS_LD2_moved_dirty_weighted_eAll21_EConly_100files_1e6.root");
+ // TFile *file=new TFile("/cache/halla/solid/sim/solid_gemc/PVDIS_LD2_JLAB_VERSION_1.3/pass4/background_solid_PVDIS_LD2_dirty_normalized_pipHallD_filenum500_5e6.root");
+double par_1=0,par_2=0,par_3=0,par_4=0,par_5=0,par_a=0,par_b=0;
+int totalN[9]={995,991,993,838,704,696,1162,931,879};
+  for(int n=0;n<num;n++){
+  tree_header[n] = (TTree*) file[n]->Get("userHeader");
+//tree_header[n]->SetBranchAddress("evn",&evn);
+//tree_header[n]->SetBranchAddress("evn_type",&evn_type);
+//tree_header[n]->SetBranchAddress("beamPol",&beamPol);
+   tree_header[n]->SetBranchAddress("userVar001", &userVar001, &b_userVar001);
+   tree_header[n]->SetBranchAddress("userVar002", &userVar002, &b_userVar002);
+   tree_header[n]->SetBranchAddress("userVar003", &userVar003, &b_userVar003);
+   tree_header[n]->SetBranchAddress("userVar004", &userVar004, &b_userVar004);
+   tree_header[n]->SetBranchAddress("userVar005", &userVar005, &b_userVar005);
+   tree_header[n]->SetBranchAddress("userVar006", &userVar006, &b_userVar006);
+   tree_header[n]->SetBranchAddress("userVar007", &userVar007, &b_userVar007);
+   tree_header[n]->SetBranchAddress("userVar008", &userVar008, &b_userVar008);
+   tree_header[n]->SetBranchAddress("userVar009", &userVar009, &b_userVar009);
+   tree_header[n]->SetBranchAddress("userVar010", &userVar010, &b_userVar010);
+  tree_generated[n] = (TTree*) file[n]->Get("generated");
+  
+  tree_generated[n]->SetBranchAddress("pid",&fGen_pid);
+  tree_generated[n]->SetBranchAddress("px",&fGen_Px);
+  tree_generated[n]->SetBranchAddress("py",&fGen_Py);
+  tree_generated[n]->SetBranchAddress("pz",&fGen_Pz);
+  tree_generated[n]->SetBranchAddress("vx",&fGen_vx);
+  tree_generated[n]->SetBranchAddress("vy",&fGen_vy);
+  tree_generated[n]->SetBranchAddress("vz",&fGen_vz);
+  
+  TGEMC_Flux[n] = (TTree*) file[n]->Get("flux");
+  
+  TGEMC_Flux[n]->SetBranchAddress("hitn",&fFluxHit_n);
+  TGEMC_Flux[n]->SetBranchAddress("id",&fFluxHit_id);
+  TGEMC_Flux[n]->SetBranchAddress("pid",&fFluxHit_pid);
+  TGEMC_Flux[n]->SetBranchAddress("mpid",&fFluxHit_mpid);
+  TGEMC_Flux[n]->SetBranchAddress("mtid",&fFluxHit_mtid);
+  TGEMC_Flux[n]->SetBranchAddress("tid",&fFluxHit_tid);
+  TGEMC_Flux[n]->SetBranchAddress("trackE",&fFluxHit_trackE);
+  TGEMC_Flux[n]->SetBranchAddress("avg_x",&fFluxHit_Avg_x);
+  TGEMC_Flux[n]->SetBranchAddress("avg_y",&fFluxHit_Avg_y);
+  TGEMC_Flux[n]->SetBranchAddress("avg_z",&fFluxHit_Avg_z);
+  TGEMC_Flux[n]->SetBranchAddress("px",&fFluxHit_Px);
+  TGEMC_Flux[n]->SetBranchAddress("py",&fFluxHit_Py);
+  TGEMC_Flux[n]->SetBranchAddress("pz",&fFluxHit_Pz);
+  TGEMC_Flux[n]->SetBranchAddress("avg_t",&fFluxHit_T);
+  TGEMC_Flux[n]->SetBranchAddress("vz",&fFluxHit_vz);
+  
+  TGEMC_EC[n] = (TTree*) file[n]->Get("solid_ec");
+  
+  TGEMC_EC[n]->SetBranchAddress("id",&fECHit_id);
+  TGEMC_EC[n]->SetBranchAddress("totEdep",&fECHit_totEdep);
+  TGEMC_EC[n]->SetBranchAddress("totEdepB",&fECHit_totEdepB);
+  TGEMC_EC[n]->SetBranchAddress("totEend",&fECHit_totEend);
+  TGEMC_EC[n]->SetBranchAddress("avg_z",&fECHit_Avg_z);
+  TGEMC_EC[n]->SetBranchAddress("mpid",&fECHit_mpid);
+  TGEMC_EC[n]->SetBranchAddress("tid",&fECHit_tid);
+  TGEMC_EC[n]->SetBranchAddress("mtid",&fECHit_mtid); 
+  TGEMC_EC[n]->SetBranchAddress("avg_lx",&fECHit_Avg_lx);
+  TGEMC_EC[n]->SetBranchAddress("avg_ly",&fECHit_Avg_ly);
+  TGEMC_EC[n]->SetBranchAddress("avg_lz",&fECHit_Avg_lz);
+  TGEMC_EC[n]->SetBranchAddress("avg_x",&fECHit_Avg_x);
+  TGEMC_EC[n]->SetBranchAddress("avg_y",&fECHit_Avg_y);
+  TGEMC_ECPS[n] = (TTree*) file[n]->Get("solid_ec_ps");
+  
+  TGEMC_ECPS[n]->SetBranchAddress("id",&fECPSHit_id);
+  TGEMC_ECPS[n]->SetBranchAddress("totEdep",&fECPSHit_totEdep);
+  TGEMC_ECPS[n]->SetBranchAddress("totEdepB",&fECPSHit_totEdepB);
+  TGEMC_ECPS[n]->SetBranchAddress("totEend",&fECPSHit_totEend);
+  TGEMC_ECPS[n]->SetBranchAddress("avg_z",&fECPSHit_Avg_z);
+  TGEMC_ECPS[n]->SetBranchAddress("mpid",&fECPSHit_mpid);
+  TGEMC_ECPS[n]->SetBranchAddress("tid",&fECPSHit_tid);
+  TGEMC_ECPS[n]->SetBranchAddress("mtid",&fECPSHit_mtid); 
+  TGEMC_ECPS[n]->SetBranchAddress("avg_lx",&fECPSHit_Avg_lx);
+  TGEMC_ECPS[n]->SetBranchAddress("avg_ly",&fECPSHit_Avg_ly);
+  TGEMC_ECPS[n]->SetBranchAddress("avg_lz",&fECPSHit_Avg_lz);
+  TGEMC_ECPS[n]->SetBranchAddress("avg_x",&fECPSHit_Avg_x);
+  TGEMC_ECPS[n]->SetBranchAddress("avg_y",&fECPSHit_Avg_y);
+  nentries[n] = (Int_t)tree_generated[n]->GetEntries();
+  printf("Entries = %i \n",nentries[n]);
+  Int_t treenumber=-1;
+  Int_t ECtreenumber=-1;
+  
+  Bool_t Fillecal=kFALSE;  
+  
+  //flux hits
+  Double_t pf;//for ECAL front det
+  Double_t pf_flux;
+  
+  Double_t th;//for ECAL front det
+  Double_t r;//for ECAL front det
+  Double_t phi;
+  Int_t i_pf=0;//for GEM plane hit index  
+  //2D hash map to store hits in time window interval and other ecal related parameters
+  //TPoint2DMap ecalPSMap;//map for pre-shower
+  //TPoint2DMap ecalShMap;//map for shower
+  TRandom *r3 = new TRandom3();
+  ecalPSMap.clear();
+  ecalShMap.clear();
+  ecalPSMapbkg.clear();
+  ecalShMapbkg.clear();  
+  //load EC map file
+  LoadEC_map("../layout/map_FAEC_ANL_20130628.txt");
+  
+  //vector to store ecal hit coordinates
+  TVector2 vec_ecalBlock;
+  Double_t ecalBlock_x;
+  Double_t ecalBlock_y;
+  TVector2 vec_ecalBlock_preshower;
+  Double_t ecalBlock_x_preshower;
+  Double_t ecalBlock_y_preshower;
+  TVector2 vec_ecalCluster;
+  Double_t ecalCluster_x;
+  Double_t ecalCluster_y;
+  Int_t ecal_clusterID;
+  Int_t ecal_blockID;
+  Int_t ecal_blockID_psh;  
+  Int_t ecal_hitblockID;
+  Int_t ecal_hitblockID_psh; 
+  Int_t ecal_hitblockIDbkg; 
+  Double_t ecalBlock_x0;
+  Double_t ecalBlock_y0;
+  Int_t ecal_blockID0;
+  Int_t ecal_blockID0_preshower;
+  Double_t ecalBlock_z0;
+  Double_t ecalPos_x0;//store main(center) block location of the 6+1 cluster
+  Double_t ecalPos_y0;
+  Double_t ecalBlock_x0_2p1;//store main(center) block location of the 2+1 cluster
+  Double_t ecalBlock_y0_2p1;
+  Double_t ecal_offset=3.5;//global center of the ecal wrt remoll setup in m
+  Double_t targ_offset=0.1;//in m
+  Int_t octantno;
+  Double_t ecalClustBlock_x;
+  Double_t ecalClustBlock_y;
+  Double_t cluster_edep[7]={0};
+  Int_t cluster_edep_blockid[7]={0};
+  Double_t cluster_PS_edep[7]={0};
+  Int_t cluster_edep_PS_blockid[7]={0};  
+  Double_t cluster_edepbkg[7]={0};
+  Int_t cluster_edep_blockidbkg[7]={0};
+  Double_t cluster_PS_edepbkg[7]={0};
+ 
+  Int_t block_count=0;
+  Int_t block_countbkg=0;
+  Int_t block_count_PS=0;  
+  Int_t block_sector=0;
+  Double_t edep_6p1_sum;  //sum of 6+1 blocks 
+  Double_t edep_6p1_PS_sum;  //sum of 6+1 blocks  
+  Double_t edep_6p1_sumbkg;  //sum of 6+1 blocks 
+
+  Double_t edep_6p1_PS_sumbkg;  //sum of 6+1 blocks  
+  Double_t edep_total_sum;  //sum ofall the ecal blocks 
+  // Double_t edep_6p1_max=0;
+  Double_t radius_6p1_max=0;
+  Double_t radius_6p1=0;
+  Double_t radius_6p1_preshower=0;
+  Double_t edep_sum0;  //photon sum of the  ecalBlock_x0,ecalBlock_y0 ecal block
+  Double_t DeltaRrDiff;
+  Double_t edep_total_PS_sum;  //sum ofall the ecal blocks 
+  //Double_t edep_2p1_PS_sum;  //sum of 6+1 blocks 
+  Double_t X;
+  Double_t Y;
+  int eventid=0;
+  Bool_t processWindow=kFALSE;//when all the events in a single window are filled to the ecal, start cluster processing
+  Fillecal=kFALSE;
+  
+  //start dissecting this ecal with a primary track
+  fTimeWindow=0;//use to keep track of current time window
+  edep_1block_sum = 0;
+  edep_1block_sum_preshower = 0; 
+  edep_sum0 = 0;
+  edep_total_sum = 0;
+  Double_t totEdep_shower=0;
+  Double_t totEdep_preshower=0;
+  //PS ecal cluster information
+  edep_6p1_PS_sum=0;
+  edep_total_PS_sum=0;	
+  double pidmass=0.511/1000;//MeV electron
+  double EC_averagex=0.0;
+  double EC_averagey=0.0;
+  double EC_localx=0.0;
+  double EC_localy=0.0;
+  double ECPS_averagex=0.0;
+  double ECPS_averagey=0.0;
+  double ECPS_localx=0.0;
+  double ECPS_localy=0.0;
+ double event_rate=0;//pi0 rate
+ double event_radrate=0;//pi0 rate
+  int flux_size=0;
+  int N_loss=0;
+  int N_total=0;
+   int Radius=0;
+    double dE=0;
+//double par_1=0,par_2=0,par_3=0,par_4=0,par_5=0,par_a=0,par_b=0;
+      double Q2_var=0;
+      double X_bj=0;
+    double pf_satisfy=0;
+  for (Int_t i=0; i<nentries[n]; i++) {
+    tree_header[n]->GetEntry(i);
+    //event_rate= userVar010->at(0)/totalN[n];
+    //event_rate= 1;
+    event_rate= userVar006->at(0)/986.0;
+    Q2_var=1;
+    X_bj=1;
+      TLorentzVector beam(0,0,11000,11000);      
+      TLorentzVector mom4_gen(0,0,0,0);
+    Long64_t local;
+    tree_generated[n]->GetEntry(i);
+    for (int j=0;j<fGen_pid->size();j++) {
+      pid_gen=fGen_pid->at(j);
+      px_gen=fGen_Px->at(j);
+      py_gen=fGen_Py->at(j);
+      pz_gen=fGen_Pz->at(j);
+      vx_gen=fGen_vx->at(j);
+      vy_gen=fGen_vy->at(j);
+      vz_gen=fGen_vz->at(j);
+      p_gen=sqrt(px_gen*px_gen+py_gen*py_gen+pz_gen*pz_gen);
+      E_gen=sqrt(pow(p_gen,2)-pow(pidmass,2))*0.001;
+      theta_gen=TMath::ACos(pz_gen/p_gen)*DEG;
+      phi_gen=TMath::ATan2(py_gen,px_gen)*DEG;
+    //  if (pid_gen==11) {
+//	mom4_gen.SetXYZT(px_gen,py_gen,pz_gen,sqrt(0.511*0.511+p_gen*p_gen));                
+//	Q2=-(beam-mom4_gen).Mag2()/1e6;
+ //     }
+    }
+    
+    
+    TGEMC_Flux[n]->GetEntry(i);
+    
+    for (int j = 0; j<fFluxHit_id->size(); j++){
+      FluxHit_detector_ID=fFluxHit_id->at(j)/1000000;
+      FluxHit_subdetector_ID=(fFluxHit_id->at(j)%1000000)/100000;
+      FluxHit_subsubdetector_ID=((fFluxHit_id->at(j)%1000000)%100000)/10000;
+      FluxHit_component_ID=fFluxHit_id->at(j)%10000;        
+      
+      pf_flux=TMath::Sqrt(TMath::Power(fFluxHit_Px->at(j),2)+TMath::Power(fFluxHit_Py->at(j),2)+TMath::Power(fFluxHit_Pz->at(j),2));
+      if (FluxHit_detector_ID==3 && FluxHit_subdetector_ID == 1 && FluxHit_subsubdetector_ID == 1 && theta_gen>22 && theta_gen<35 /*&& pf_flux>1000 && pf_flux<=12000 && fFluxHit_tid->at(j)==1*/ /*&& Q2>1*/ ){    
+	r = 0.1*TMath::Sqrt(TMath::Power(fFluxHit_Avg_x->at(j),2)+TMath::Power(fFluxHit_Avg_y->at(j),2));
+	th=TMath::ATan(r/(fFluxHit_Avg_z->at(j) - targ_offset))*DEG;
+	pf_satisfy+=pf_flux;
+	flux_size =fFluxHit_id->size();
+	fluxp_vs_R->Fill(r,pf_flux/1000);
+	processWindow=kTRUE;//process this event
+	
+	single_event.pid=fFluxHit_pid->at(j);
+	single_event.x=fFluxHit_Avg_x->at(j)*0.1;
+	single_event.y=fFluxHit_Avg_y->at(j)*0.1;
+	X=fFluxHit_Avg_x->at(j)*0.1;
+	Y=fFluxHit_Avg_y->at(j)*0.1;
+	//radius_6p1_max = TMath::Sqrt(TMath::Power(X,2)+TMath::Power(Y,2));
+	single_event.pf=pf_flux;
+	single_event.blockID =FluxHit_component_ID;    
+	event_list.push_back(single_event);          
+	//event_list.push_back(single_event);
+	Fillecal=kTRUE;
+	break;
+      } else{
+	Fillecal=kFALSE;
+	//processWindow=kFALSE;
+      }
+    } 
+    
+    if (Fillecal){
+      TGEMC_EC[n]->GetEntry(i);
+      TGEMC_ECPS[n]->GetEntry(i);
+      totEdep_shower=0;
+      totEdep_preshower=0;
+      EC_averagex=0.0;
+      EC_averagey=0.0;
+      EC_localx=0.0;
+      EC_localy=0.0;
+      for (int j = 0; j<fECHit_id->size(); j++){
+	ECHit_detector_ID=fECHit_id->at(j)/1000000;
+	ECHit_subdetector_ID=(fECHit_id->at(j)%1000000)/100000;
+	ECHit_subsubdetector_ID=((fECHit_id->at(j)%1000000)%100000)/10000;
+	ECHit_component_ID=fECHit_id->at(j)%10000;
+	
+	if (ECHit_detector_ID==3 && ECHit_subdetector_ID == 1 && ECHit_subsubdetector_ID == 0){//shower 
+	    EC_averagex=fECHit_Avg_x->at(j)*0.1;
+	    EC_averagey=fECHit_Avg_y->at(j)*0.1;
+	    EC_localx=fECHit_Avg_lx->at(j)*0.1;
+	    EC_localy=fECHit_Avg_ly->at(j)*0.1;
+	    totEdep_shower+=fECHit_totEend->at(j);
+          if (ecalShMap.count(ECHit_component_ID)){
+            ecalShMap[ECHit_component_ID]+=fECHit_totEend->at(j);// MeV
+          } else {
+            ecalShMap[ECHit_component_ID]=fECHit_totEend->at(j);// MeV
+           }
+	}
+      }//end EChit loop
+      for (int j = 0; j<fECPSHit_id->size(); j++){
+	ECPSHit_detector_ID=fECPSHit_id->at(j)/1000000;
+	ECPSHit_subdetector_ID=(fECPSHit_id->at(j)%1000000)/100000;
+	ECPSHit_subsubdetector_ID=((fECPSHit_id->at(j)%1000000)%100000)/10000;
+	ECPSHit_component_ID=fECPSHit_id->at(j)%10000;
+	
+	if (ECPSHit_detector_ID==3 && ECPSHit_subdetector_ID == 1 && ECPSHit_subsubdetector_ID ==1 ){//shower 
+	    ECPS_averagex=fECPSHit_Avg_x->at(j)*0.1;
+	    ECPS_averagey=fECPSHit_Avg_y->at(j)*0.1;
+	    ECPS_localx=fECPSHit_Avg_lx->at(j)*0.1;
+	    ECPS_localy=fECPSHit_Avg_ly->at(j)*0.1;
+	    totEdep_preshower+=fECPSHit_totEend->at(j);
+          if (ecalPSMap.count(ECPSHit_component_ID)){
+            ecalPSMap[ECPSHit_component_ID]+=fECPSHit_totEend->at(j);// MeV
+          } else {
+            ecalPSMap[ECPSHit_component_ID]=fECPSHit_totEend->at(j);// MeV
+           }
+	}
+      }//end PSEChit loop
+      
+      }
+      //process hits in this time window
+      if (processWindow){  
+	edep_6p1_sum=0;
+	edep_6p1_PS_sum=0;
+        edep_6p1_sumbkg=0;	
+	edep_6p1_PS_sumbkg=0;
+	for (Int_t c=0;c<7;c++){//init cluster array
+	  cluster_edep[c]=0;
+	  cluster_edep_blockid[c]=0;
+	  cluster_PS_edep[c]=0;
+	  cluster_edep_PS_blockid[c]=0;	  
+          cluster_edepbkg[c]=0;
+          cluster_edepbkg[c]=0;
+          cluster_edep_blockidbkg[c]=0;
+	  cluster_PS_edepbkg[c]=0;
+	
+	}
+	for (Int_t c=0;c<30;c++){
+	  edep_6p1_max1[c] = 0;
+	  radius_6p1_max1[c]={0};
+	  edep_6p1_preshower_max1[c] = 0;
+	  radius_6p1_preshower_max1[c]={0};	  
+	  edep_6p1_x[c]={0};
+	  edep_6p1_y[c]={0};
+	  edep_6p1_x_preshower[c]={0};
+	  edep_6p1_y_preshower[c]={0};	  
+	}   
+	//edep_6p1_max = 0;
+	octantno = -1;
+	
+	for (std::map<Int_t,Double_t>::iterator it = ecalShMap.begin(); it != ecalShMap.end(); ++it ){
+	  ecal_blockID = it->first;	
+	  edep_1block_sum = it->second;
+	  vec_ecalBlock = GetECALBlock_coord(ecal_blockID);
+	  ecalBlock_x = vec_ecalBlock.Px();
+	  ecalBlock_y = vec_ecalBlock.Py();
+	  radius_6p1=TMath::Sqrt(TMath::Power(ecalBlock_x,2)+TMath::Power(ecalBlock_y,2));
+	  octantno = 0;//Int_t(phi/12);//octant number 0 to 29 for 30 octants
+	  if (octantno>29)
+	    octantno=29;//for phi is 360           
+	    ecal_hitblockID=ecal_blockID;
+	  block_count = GetECALCluser(ecal_hitblockID,cluster_edep_blockid);
+	  cluster_edep[0]=ecalShMap[cluster_edep_blockid[0]];
+	  edep_6p1_sum = cluster_edep[0];
+	  for(Int_t j=0;j<block_count;j++){
+	    cluster_edep[j+1]=ecalShMap[cluster_edep_blockid[j+1]];
+	    edep_6p1_sum +=cluster_edep[j+1];
+            if(cluster_edep[0]!=0){
+	    // 
+            }
+	  }
+
+	  if (edep_6p1_sum >= edep_6p1_max1[octantno]){
+	    ecalBlock_x0=ecalBlock_x;
+	    ecalBlock_y0=ecalBlock_y;
+	    ecal_blockID0 = ecal_blockID;
+	    // cout<<"octantno="<<octantno<<endl;
+	    edep_6p1_x[octantno]=ecalBlock_x;
+	    edep_6p1_y[octantno]=ecalBlock_y;
+	    radius_6p1_max1[octantno]=TMath::Sqrt(TMath::Power(ecalBlock_x,2)+TMath::Power(ecalBlock_y,2));
+	    edep_6p1_max1[octantno]=edep_6p1_sum;
+	  }
+	}//end of processing shower
+          vec_ecalBlock_preshower = GetECALBlock_coord(ecal_blockID0);
+	  ecalBlock_x_preshower = vec_ecalBlock_preshower.Px();
+	  ecalBlock_y_preshower = vec_ecalBlock_preshower.Py();
+	  radius_6p1_preshower=TMath::Sqrt(TMath::Power(ecalBlock_x_preshower,2)+TMath::Power(ecalBlock_y_preshower,2));
+	  octantno = 0;//Int_t(phi/12);//octant number 0 to 29 for 30 octants
+	  if (octantno>29)
+	    octantno=29;//for phi is 360           
+           ecal_hitblockID_psh = ecal_blockID0;
+	  block_count_PS = GetECALCluser(ecal_hitblockID_psh,cluster_edep_PS_blockid);
+	  cluster_PS_edep[0]=ecalPSMap[cluster_edep_PS_blockid[0]];
+	  edep_6p1_PS_sum = cluster_PS_edep[0];
+	  for(Int_t j=0;j<block_count_PS;j++){
+	    cluster_PS_edep[j+1]=ecalPSMap[cluster_edep_PS_blockid[j+1]];
+	    edep_6p1_PS_sum +=cluster_PS_edep[j+1];
+           }
+	  
+            ecal_blockID0_preshower = ecal_blockID_psh;
+	    edep_6p1_x_preshower[octantno]=ecalBlock_x_preshower;
+	    edep_6p1_y_preshower[octantno]=ecalBlock_y_preshower;
+	    radius_6p1_max1[octantno]=TMath::Sqrt(TMath::Power(ecalBlock_x_preshower,2)+TMath::Power(ecalBlock_y_preshower,2));
+	   edep_6p1_preshower_max1[octantno]=edep_6p1_PS_sum;
+	//		edep_6p1_max1[octantno]=totEdep_shower;
+	//		edep_6p1_preshower_max1[octantno]=totEdep_preshower;     
+            
+	 // }
+        //} //end the preshower loop
+/*********************************************load bkg map*************************************************************************************************/
+      if (!bDisableBkg){
+        edep_total_sum=0;
+        rndTimeWindow = (Int_t)(r3->Uniform()*(total_ecalShMapbkg.size()-1));
+        getBkgEdepPS(rndTimeWindow);
+        getBkgEdepSh(rndTimeWindow);
+        ecal_hitblockIDbkg=ecal_blockID0; 
+        block_countbkg = GetECALCluser(ecal_hitblockIDbkg,cluster_edep_blockidbkg);
+        cluster_edepbkg[0]=ecalShMapbkg[cluster_edep_blockidbkg[0]];
+        edep_6p1_sumbkg = cluster_edepbkg[0];
+        for(Int_t j=0;j<block_countbkg;j++){
+          cluster_edepbkg[j+1]=ecalShMapbkg[cluster_edep_blockidbkg[j+1]];
+          edep_6p1_sumbkg +=cluster_edepbkg[j+1];
+        }
+        cluster_PS_edepbkg[0]=ecalPSMapbkg[cluster_edep_blockidbkg[0]];
+        edep_6p1_PS_sumbkg = cluster_PS_edepbkg[0];
+        for(Int_t j=0;j<block_countbkg;j++){
+          cluster_PS_edepbkg[j+1]=ecalPSMapbkg[cluster_edep_blockidbkg[j+1]];
+          edep_6p1_PS_sumbkg +=cluster_PS_edepbkg[j+1];
+        }
+
+     }
+
+    /******************************************************************************************************************************************************	
+	/******************************************************************************************************************************************************/ 
+	Int_t hit_pid_index;
+	Int_t hit_pid_index2;
+	Double_t hit_phi;
+	Double_t event_p;
+	Double_t DeltaX; 
+	Double_t DeltaY;
+	Double_t DeltaR;
+	Int_t hit_octant;
+	Int_t Ri;
+        double EC_Calipreshower;
+        double EC_Calishower;
+        double R_hit=0;
+        double E_in=0;
+        double E_out=0;
+   //cout<<"i="<<i<<"E_gen="<<E_gen<<endl;   
+   for(Int_t e=0;e<event_list.size();e++){
+
+   Radius= GetRadiusIndex(radius_6p1_max1[octantno]);   
+   //cout<<"event="<<i<<"radius="<<Radius<<endl;
+
+   event_p = event_list[e].pf;
+   R_hit=TMath::Sqrt(TMath::Power(event_list[e].x,2)+TMath::Power(event_list[e].y,2));
+   dE=1.0; 
+   //cout<<"i="<<i<<"E_gen="<<E_gen<<"R_max="<<radius_6p1_max1[octantno]<<"Radius="<<Radius<<endl;   
+   E_vs_R->Fill(R_hit,((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/1000);
+   hit_pid_index =  pidmap[event_list[e].pid];//pid index starts from 1 but array index starts from 0
+   hit_octant = 0;//since there will only be one event per window I disabled sector id//Int_t(phi/12);
+   if (hit_octant>29)
+     hit_octant=29;   
+    EC_Calipreshower=(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS;
+    EC_Calishower= (edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2;  
+   if(edep_6p1_max1[octantno]>0 && edep_6p1_preshower_max1[hit_octant]>0){
+    histo_edep_Sh_radius_nothreshold[Radius]->Fill((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg),event_rate); 
+    histo_edep_Sh_radius_nothreshold_nobkg[Radius]->Fill(edep_6p1_preshower_max1[hit_octant],event_rate); 
+   }
+   if( event_p>1000){
+    PreE_hist_Rbin[Radius]->Fill((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg));
+    for(int i=1;i<11;i++){
+    double pbin_min=1+(i-1)*1;
+    double pbin_max=2+(i-1)*1;
+    if(event_p/1000>=pbin_min && event_p/1000<pbin_max){
+    Eoverp_hist_bin[i]->Fill((((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS)*dE/event_p);
+    PreE_hist_bin[i]->Fill((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg));
+    }
+   }
+   if(event_p<=3000 && event_p>2500){
+   par_1 += event_p*edep_6p1_max1[hit_octant];
+   par_2 += edep_6p1_preshower_max1[hit_octant]*edep_6p1_preshower_max1[hit_octant];
+   par_3 += event_p*edep_6p1_preshower_max1[hit_octant];
+   par_4 += edep_6p1_preshower_max1[hit_octant]*edep_6p1_max1[hit_octant];
+   par_5 += edep_6p1_max1[hit_octant]*edep_6p1_max1[hit_octant];
+   /*par_1 += event_p*totEdep_shower;
+   par_2 += totEdep_preshower*totEdep_preshower;
+   par_3 += event_p*totEdep_preshower;
+   par_4 += totEdep_preshower*totEdep_shower;
+   par_5 += totEdep_shower*totEdep_shower;*/
+
+   preshower_Cali->Fill((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg+edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)*dE/event_p,(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)/1000);
+   preshower_Cali2->Fill(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p,((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)/1000);
+    }
+    preshower_vs_p->Fill(event_p/1000,((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg))/1000);
+    Eoverp_vs_p->Fill(event_p/1000,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p);
+    //double  M[6] = {Q2_var,X_bj,theta_gen,event_p/1000,Radius,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p};
+    //Qsq_x_Theta_p_hist->Fill(M);
+   // double  M[7] = {Q2_var,X_bj,theta_gen,event_p/1000,Radius,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p,(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)/1000};
+    double  M[8] = {Q2_var,X_bj,theta_gen,event_p/1000,Radius,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/1000,(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS/1000,(edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2/1000};
+    Qsq_x_Theta_p_hist->Fill(M,event_rate);
+    double  MN[8] = {Q2_var,X_bj,theta_gen,event_p/1000,Radius,(((edep_6p1_max1[hit_octant])/f_samp2)+(edep_6p1_preshower_max1[hit_octant])*f_samp2_PS+f_samp2_ps_con)*dE/1000,(edep_6p1_preshower_max1[hit_octant])*f_samp2_PS/1000,(edep_6p1_max1[hit_octant])/f_samp2/1000};
+    Qsq_x_Theta_p_nobkg_hist->Fill(MN,event_rate);
+    Theta_vs_p->Fill(theta_gen,event_p/1000,event_rate);
+    if((edep_6p1_max1[octantno]+edep_6p1_sumbkg) >GetThreshold6p1(radius_6p1_max1[hit_octant])){
+    Theta_vs_p_threshold->Fill(theta_gen,event_p/1000,event_rate);
+    }
+    if(Radius>=0){
+    Eoverp_vs_p_radius[Radius]->Fill(event_p/1000,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p);
+     }
+   }// p>1000 cut
+
+  double pgen_down=fiducialA(event_p/1000);
+  double pgen_up=fiducialB(event_p/1000);
+  double pgen_High=fiducialC(event_p/1000);
+    //double  MP[7] = {Q2_var,X_bj,theta_gen,event_p/1000,Radius,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p,(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)/1000};
+    double  MP[8] = {Q2_var,X_bj,theta_gen,event_p/1000,Radius,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/1000,(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS/1000,(edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2/1000};
+    double  MPN[8] = {Q2_var,X_bj,theta_gen,event_p/1000,Radius,(((edep_6p1_max1[hit_octant])/f_samp2)+(edep_6p1_preshower_max1[hit_octant])*f_samp2_PS+f_samp2_ps_con)*dE/1000,(edep_6p1_preshower_max1[hit_octant])*f_samp2_PS/1000,(edep_6p1_max1[hit_octant])/f_samp2/1000};
+  //if((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg) >GetThreshold6p1(R_hit)){
+   for(int lbin=0;lbin<13;lbin++){
+    double preth=0.003+lbin*0.001;
+   // double preth=0.02+lbin*0.01;
+    //cout<<"event="<<i<<"preshowerE="<<(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)/1000<<"threshold="<<preth<<endl;
+    if((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)/1000>preth){
+    //cout<<"event="<<i<<"preshowerE="<<(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)/1000<<"m="<<lbin<<"threshold="<<preth<<"Fill"<<endl;
+       Qsq_x_Theta_p_precut_hist[lbin]->Fill(MP,event_rate);
+    }
+    if((edep_6p1_preshower_max1[hit_octant])/1000>preth){
+       Qsq_x_Theta_p_precut_nobkg_hist[lbin]->Fill(MPN,event_rate);
+    }
+   }
+    if((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)/1000>0.015){
+     if(Radius>0 && Radius<6){
+      if((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)>0 &&  event_p>1000 && (((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p>pgen_down ){
+    PreE_hist_cut_Rbin[Radius]->Fill((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg));
+     for(int i=1;i<11;i++){
+    double pbin_min=1+(i-1)*1;
+    double pbin_max=2+(i-1)*1;
+    if(event_p/1000>=pbin_min && event_p/1000<pbin_max){
+    Eoverp_hist_cut_bin[i]->Fill((((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS)*dE/event_p);
+    PreE_hist_cut_bin[i]->Fill((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg));
+    }
+  }
+    if(event_p<=3000 && event_p>2000){
+    preshower_Calie->Fill((((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p,((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)/1000);
+    }
+    preshower_vs_pe->Fill(event_p/1000,(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)/1000);
+    Eoverp_vs_pe->Fill(event_p/1000,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p);
+    //double  N[7] = {Q2_var,X_bj,theta_gen,event_p/1000,Radius,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p,(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)/1000};
+    double  N[8] = {Q2_var,X_bj,theta_gen,event_p/1000,Radius,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/1000,(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS/1000,(edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2/1000};
+    Qsq_x_Theta_p_cut_hist->Fill(N,event_rate);
+    Theta_vs_p_cut->Fill(theta_gen,event_p/1000,event_rate);
+    if((edep_6p1_max1[octantno]+edep_6p1_sumbkg) >GetThreshold6p1(radius_6p1_max1[hit_octant])){
+    Theta_vs_p_cut_threshold->Fill(theta_gen,event_p/1000,event_rate);
+    }
+      Eoverp_vs_pe_radius[Radius]->Fill(event_p/1000,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p);
+    } // E/p cut
+   }else if(Radius==6){
+    if((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)>0 &&  event_p>1000 && (((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p>pgen_up ){
+    PreE_hist_cut_Rbin[Radius]->Fill((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg));
+     for(int i=1;i<11;i++){
+    double pbin_min=1+(i-1)*1;
+    double pbin_max=2+(i-1)*1;
+    if(event_p/1000>=pbin_min && event_p/1000<pbin_max){
+    Eoverp_hist_cut_bin[i]->Fill((((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS)*dE/event_p);
+    PreE_hist_cut_bin[i]->Fill((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg));
+    }
+  }
+    if(event_p<=3000 && event_p>2000){
+    preshower_Calie->Fill((((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p,((edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)/1000);
+    }
+    preshower_vs_pe->Fill(event_p/1000,(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)/1000);
+    Eoverp_vs_pe->Fill(event_p/1000,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p);
+    //double  N[7] = {Q2_var,X_bj,theta_gen,event_p/1000,Radius,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p,(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)/1000};
+    double  N[8] = {Q2_var,X_bj,theta_gen,event_p/1000,Radius,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/1000,(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS/1000,(edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2/1000};
+    Qsq_x_Theta_p_cut_hist->Fill(N,event_rate);
+    Theta_vs_p_cut->Fill(theta_gen,event_p/1000,event_rate);
+    if((edep_6p1_max1[octantno]+edep_6p1_sumbkg) >GetThreshold6p1(radius_6p1_max1[hit_octant])){
+    Theta_vs_p_cut_threshold->Fill(theta_gen,event_p/1000,event_rate);
+    }
+      Eoverp_vs_pe_radius[Radius]->Fill(event_p/1000,(((edep_6p1_max1[hit_octant]+edep_6p1_sumbkg)/f_samp2)+(edep_6p1_preshower_max1[hit_octant]+edep_6p1_PS_sumbkg)*f_samp2_PS+f_samp2_ps_con)*dE/event_p);
+    } //E/p cut
+   }//radius
+  }
+    if((edep_6p1_preshower_max1[hit_octant])/1000>0.015){
+     if(Radius>0 && Radius<6){
+      if((edep_6p1_max1[hit_octant])>0 &&  event_p>1000 && (((edep_6p1_max1[hit_octant])/f_samp2)+(edep_6p1_preshower_max1[hit_octant])*f_samp2_PS+f_samp2_ps_con)*dE/event_p>pgen_down ){
+    double  NN[8] = {Q2_var,X_bj,theta_gen,event_p/1000,Radius,(((edep_6p1_max1[hit_octant])/f_samp2)+(edep_6p1_preshower_max1[hit_octant])*f_samp2_PS+f_samp2_ps_con)*dE/1000,(edep_6p1_preshower_max1[hit_octant])*f_samp2_PS/1000,(edep_6p1_max1[hit_octant])/f_samp2/1000};
+    Qsq_x_Theta_p_cut_nobkg_hist->Fill(NN,event_rate);
+    } // E/p cut
+   }else if(Radius==6){
+    if((edep_6p1_max1[hit_octant])>0 &&  event_p>1000 && (((edep_6p1_max1[hit_octant])/f_samp2)+(edep_6p1_preshower_max1[hit_octant])*f_samp2_PS+f_samp2_ps_con)*dE/event_p>pgen_up ){
+    double  NN[8] = {Q2_var,X_bj,theta_gen,event_p/1000,Radius,(((edep_6p1_max1[hit_octant])/f_samp2)+(edep_6p1_preshower_max1[hit_octant])*f_samp2_PS+f_samp2_ps_con)*dE/1000,(edep_6p1_preshower_max1[hit_octant])*f_samp2_PS/1000,(edep_6p1_max1[hit_octant])/f_samp2/1000};
+    Qsq_x_Theta_p_cut_nobkg_hist->Fill(NN,event_rate);
+    } //E/p cut
+   }//radius
+  }//preshower cut	 
+ // }    
+ }///end eventlist
+ processWindow=kFALSE;//reset till next window is filled
+ ecalPSMap.clear();
+ ecalShMap.clear();
+ event_list.clear();
+ Fillecal=kFALSE;
+ 
+      }//endProcesswindow
+    }//end entries
+}
+par_a=(par_1*par_2-par_3*par_4)/(par_5*par_2-par_4*par_4);
+par_b=(par_5*par_3-par_1*par_4)/(par_5*par_2-par_4*par_4);
+cout<<"a===="<<par_a<<"b==="<<par_b<<endl;  
+//   output_file->Close(); 
+TF1 *fit_2= new TF1("fit_2","gaus(0)",0.9,1.1);
+TF1 *fit_0= new TF1("fit_0","gaus(0)",0.9,1.1);
+TF1 *fit_4= new TF1("fit_4","gaus(0)",0.88,1.1);
+fit_2->SetParameters(90.94,0.986,0.05);
+fit_4->SetParameters(90.94,0.986,0.05);
+fit_0->SetParameters(1115.06,0.989663,0.0532444);
+//TF1 *fit_2= new TF1("fit_2","gaus(0)",0.7,2.2);
+//fit_2->SetParameters(90.94,1.5,0.12);
+TF1 *fit_3= new TF1("fit_3","gaus(0)",0,0.5);
+fit_3->SetParameters(70.42,0.056,0.028);
+double Eoverp_mean[10];
+double Eoverp_mean_error[10];
+double Eoverp_sigma[10];
+double Eoverp_sigma_error[10];
+double PreE_mean[10];
+double PreE_mean_error[10];
+double PreE_sigma[10];
+double PreE_sigma_error[10];
+for(int m=0;m<10;m++){
+Eoverp_mean[m]=0;
+Eoverp_mean_error[m]=0;
+Eoverp_sigma[m]=0;
+Eoverp_sigma_error[m]=0;
+
+
+PreE_mean[m]=0;
+PreE_mean_error[m]=0;
+PreE_sigma[m]=0;
+PreE_sigma_error[m]=0;
+}
+
+TCanvas *pvsr = new TCanvas("pvsr","pvsr",1600,900);
+pvsr->Divide(2);
+pvsr->cd(1);
+fluxp_vs_R->Draw("COLZ");
+
+pvsr->cd(2);
+E_vs_R->Draw("COLZ");
+
+TCanvas *PreE = new TCanvas("PreE","PreE",1600,900);
+PreE->Divide(3,3);
+for(int m=1;m<9;m++){
+PreE->cd(m);
+PreE_hist_bin[m]->Draw();
+//PreE_hist_bin[m]->Fit("fit_3","R");
+PreE_mean[m]=fit_3->GetParameter(1);
+//PreE_mean[m]=PreE_hist_bin[m]->GetMean();
+PreE_mean_error[m]=fit_3->GetParError(1);
+PreE_sigma[m]=fit_3->GetParameter(2);
+//PreE_sigma[m]=PreE_hist_bin[m]->GetRMS();
+PreE_sigma_error[m]=fit_3->GetParError(2);
+cout<<"mean="<<PreE_mean[m]<<"RMS="<<PreE_sigma[m]<<endl;
+}
+
+TF1 *sampfun1 = new TF1("sampfun1","-0.0013648*x*x+0.0240263*x+0.844713", 1,11);
+//TF1 *sampfun2 = new TF1("sampfun2","0.000400392*x*x-0.00947385*x+1.12594", 1,11);
+
+TCanvas *Eoverp_radius = new TCanvas("Eoverp_radius","Eoverp_radius",1600,900);
+Eoverp_radius->Divide(3,3);
+for(int m=0;m<8;m++){
+Eoverp_radius->cd(m+1);
+Eoverp_vs_p_radius[m]->Draw("COLZ");
+sampfun1->SetLineColor(6);
+sampfun1->SetLineWidth(2);
+sampfun1->Draw("same");
+//sampfun2->SetLineColor(6);
+//sampfun2->SetLineWidth(2);
+//sampfun2->Draw("same");
+//Eoverp_vs_pe_radius[m]->Draw("COLZ same");
+}
+TCanvas *Eoverp = new TCanvas("Eoverp","Eoverp",1600,900);
+Eoverp->Divide(3,3);
+for(int t=1;t<3;t++){
+Eoverp->cd(t);
+Eoverp_hist_bin[t]->Draw();
+Eoverp_hist_bin[t]->Fit("fit_0","R");
+Eoverp_mean[t]=fit_0->GetParameter(1);
+Eoverp_mean_error[t]=fit_0->GetParError(1);
+Eoverp_sigma[t]=fit_0->GetParameter(2);
+Eoverp_sigma_error[t]=fit_0->GetParError(2);
+}
+for(int m=3;m<9;m++){
+Eoverp->cd(m);
+Eoverp_hist_bin[m]->Draw();
+Eoverp_hist_bin[m]->Fit("fit_2","R+");
+Eoverp_mean[m]=fit_2->GetParameter(1);
+Eoverp_mean_error[m]=fit_2->GetParError(1);
+Eoverp_sigma[m]=fit_2->GetParameter(2);
+Eoverp_sigma_error[m]=fit_2->GetParError(2);
+}
+Eoverp->cd(9);
+Eoverp_hist_bin[9]->Draw();
+Eoverp_hist_bin[9]->Fit("fit_4","R+");
+Eoverp_mean[9]=fit_4->GetParameter(1);
+Eoverp_mean_error[9]=fit_4->GetParError(1);
+Eoverp_sigma[9]=fit_4->GetParameter(2);
+Eoverp_sigma_error[9]=fit_4->GetParError(2);
+
+   const Int_t n = 9;
+   //const Int_t n = 6;
+
+   Double_t res[n];
+   Double_t res_error[n];
+   Double_t res1[n]; 
+   Double_t res1_error[n];
+   Double_t errorN1[n];
+   Double_t errorN2[n];
+   Double_t resH[n];
+   Double_t resH_error[n];
+   Double_t res2[n];
+   Double_t res2_error[n];
+
+
+   for (Int_t i=0;i<2;i++) {
+     res[i]=Eoverp_mean[i+1]-3.5*Eoverp_sigma[i+1];
+     res2[i]=PreE_mean[i+1]-3.5*PreE_sigma[i+1];
+     resH[i]=Eoverp_mean[i+1]+3.5*Eoverp_sigma[i+1];  
+     res_error[i]=sqrt(pow(Eoverp_mean_error[i+1],2)+pow(Eoverp_sigma_error[i+1],2));
+     resH_error[i]=sqrt(pow(Eoverp_mean_error[i+1],2)+pow(Eoverp_sigma_error[i+1],2));
+     res2_error[i]=sqrt(pow(PreE_mean_error[i+1],2)+pow(PreE_sigma_error[i+1],2)); 
+     res1[i]=Eoverp_hist_cut_bin[i+1]->GetEntries()/Eoverp_hist_bin[i+1]->GetEntries();
+     errorN1[i]=Eoverp_hist_cut_bin[i+1]->GetEntries();
+     errorN2[i]=Eoverp_hist_bin[i+1]->GetEntries();
+     res1_error[i]=sqrt(1/errorN1[i]+1/errorN2[i])*res1[i];  
+     Eoverpcut_Eff->SetBinContent(i+1,res1[i]); 
+     Eoverpcut_Eff->SetBinError(i+1,res1_error[i]); 
+     //cout<<"preshowercut="<<res2[i]<<"showercutmean="<<Eoverp_mean[i+1]<<"sigma="<<Eoverp_sigma[i+1]<<endl;
+    }
+   for (Int_t i=2;i<n;i++) {
+     res[i]=Eoverp_mean[i+1]-3.5*Eoverp_sigma[i+1];
+     res2[i]=PreE_mean[i+1]-3.5*PreE_sigma[i+1];
+     resH[i]=Eoverp_mean[i+1]+3.5*Eoverp_sigma[i+1];
+     res_error[i]=sqrt(pow(Eoverp_mean_error[i+1],2)+pow(Eoverp_sigma_error[i+1],2));
+     resH_error[i]=sqrt(pow(Eoverp_mean_error[i+1],2)+pow(Eoverp_sigma_error[i+1],2));
+     res2_error[i]=sqrt(pow(PreE_mean_error[i+1],2)+pow(PreE_sigma_error[i+1],2)); 
+     res1[i]=Eoverp_hist_cut_bin[i+1]->GetEntries()/Eoverp_hist_bin[i+1]->GetEntries();
+     errorN1[i]=Eoverp_hist_cut_bin[i+1]->GetEntries();
+     errorN2[i]=Eoverp_hist_bin[i+1]->GetEntries();
+     res1_error[i]=sqrt(1/errorN1[i]+1/errorN2[i])*res1[i]; 
+     Eoverpcut_Eff->SetBinContent(i+1,res1[i]); 
+     Eoverpcut_Eff->SetBinError(i+1,res1_error[i]);   
+     //cout<<"preshowercut="<<res2[i]<<"showercutmean="<<Eoverp_mean[i+1]<<"sigma="<<Eoverp_sigma[i+1]<<endl;
+    }
+   Double_t E[n]={1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5};
+   Double_t E_error[n]={0,0,0,0,0,0,0,0,0};   
+   //Double_t E[n]={1.5,2.5,3.5,4.5,5.5,6.5};
+   //Double_t E_error[n]={0,0,0,0,0,0};   
+  // Double_t E[n]={1.5,2.5,3.5,4.5,5.5,6.5};
+  // Double_t E_error[n]={0,0,0,0,0,0};
+  // Double_t E[n]={0};
+  /* for(int i=0;i<n;i++){
+   E[i]= 1.25+i*0.5;
+   cout<<"E="<<E[i]<<endl;
+   }
+   Double_t E_error[n]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};*/
+  gr = new TGraphErrors(n,E,res,E_error,res_error);
+  gr1 = new TGraphErrors(n,E,res1,E_error,res1_error);
+  grH = new TGraphErrors(n,E,resH,E_error,resH_error);
+  gr2 = new TGraphErrors(n,E,res2,E_error,res2_error);
+gr1->Print();
+double fitmin=2000;
+double fitmax=3000;
+//edep_vs_layer->Divide(edep_hist); 
+TF1 *fit_fuc= new TF1("fit_fuc","gaus",fitmin,fitmax);
+TF1 *fit_cal= new TF1("fit_cal","[0]*x+[1]",0,250);
+fit_cal->SetParameters(f_samp_PS,f_samp_ps_con);
+TCanvas *c_Calibrate = new TCanvas("c_Calibrate","c_Calibrate",800,800);
+Preshower_vs_prescin->Draw("COLZ");
+fit_cal->Draw("same");
+double par1= fit_fuc->GetParameter(1);
+double par1_error= fit_fuc->GetParError(1);
+double par2= fit_fuc->GetParameter(2);
+double par2_error= fit_fuc->GetParError(2);
+double deltaE= par2/par1;
+double error_deltaE=sqrt(pow(par2_error/par2,2)+pow(par1_error/par1,2))*deltaE;
+//cout<<"mu="<<par1<<"sigma="<<par2<<"DeltaE="<<deltaE<<"errorE="<<error_deltaE<<endl;
+// c->SaveAs("totEdep_ec.png");
+TF1 *fun1= new TF1("fun1","[0]*x*x+[1]*x+[2]",1.5,11);
+TF1 *funlow= new TF1("funlow","[0]*x*x+[1]*x+[2]",1,11);
+TF1 *funhigh= new TF1("funhigh","[0]*x*x+[1]*x+[2]",1,11);
+funlow->SetParameters(-0.00208501,0.0351633,0.814592);
+funhigh->SetParameters(0.000947165,-0.0160743,1.15714);
+funlow->SetLineColor(6);
+funhigh->SetLineColor(6);
+TF1 *funfit= new TF1("funfit","gaus(0)+gaus(3)",0.2,0.4);
+TCanvas *Edep = new TCanvas("Edep","Edep",1600,900);
+Edep->Divide(2,2);
+Edep->cd(1);
+//edep_scinlead_hist->Draw();
+//Edep->cd(2);
+preshower_Cali->SetMarkerColor(1);
+preshower_Cali->SetMarkerStyle(7);
+preshower_Cali2->SetMarkerColor(1);
+preshower_Cali2->SetMarkerStyle(7);
+
+preshower_Calie->SetMarkerColor(1);
+preshower_Calie->SetMarkerStyle(7);
+preshower_Cali2->Draw();
+preshower_Calie->Draw("COLZ same");
+/*Edep->cd(2);
+   prelead_vs_preshower->Draw("COLZ");
+Edep->cd(3);
+   Al_vs_preshower->Draw("COLZ");
+Edep->cd(4);
+   samp_hist->Draw();*/
+
+Edep->cd(2);
+  /* TPad *grid = new TPad("grid","",0,0,1,1);
+   grid->Draw();
+   grid->cd();
+   grid->SetGrid();
+   grid->SetFillStyle(8000);*/
+gr1->GetXaxis()->SetTitle("p (GeV/c)");
+gr1->GetYaxis()->SetTitle("Efficiency");
+gr1->SetTitle("E/p cut efficiency");
+gr1->Draw("Ap*");
+
+//Eoverp_hist_bin[2]->Draw();
+//Eoverp_hist_bin[2]->Fit("fit_2","R");
+
+
+Edep->cd(3);
+preshower_vs_p->SetMarkerColor(1);
+preshower_vs_p->SetMarkerStyle(7);
+preshower_vs_p->Draw();
+
+preshower_vs_pe->SetMarkerColor(2);
+preshower_vs_pe->SetMarkerStyle(7);
+preshower_vs_pe->Draw("COLZ same");
+gr2->SetMarkerSize(2.5);
+//gr2->SetMarkerStyle(22);
+gr2->SetMarkerColor(2);
+//gr2->Draw("p*same");
+//gr2->Fit("fun1","R");
+
+Edep->cd(4);
+Eoverp_vs_p->SetMarkerColor(1);
+Eoverp_vs_p->SetMarkerStyle(7);
+Eoverp_vs_p->Draw();
+Eoverp_vs_pe->SetMarkerColor(2);
+Eoverp_vs_pe->SetMarkerStyle(7);
+Eoverp_vs_pe->Draw("COLZ same");
+gr->SetMarkerSize(2.5);
+//gr->SetMarkerStyle(22);
+gr->SetMarkerColor(2);
+gr->Draw("p*same");
+gr->Fit("funlow","R");
+double parlow[3];
+parlow[0]= funlow->GetParameter(0);
+parlow[1]= funlow->GetParameter(1);
+parlow[2]= funlow->GetParameter(2);
+
+grH->SetMarkerSize(2.5);
+//gr->SetMarkerStyle(22);
+grH->SetMarkerColor(2);
+//grH->Draw("p*same");
+//grH->Fit("funhigh","R");
+double parhigh[3];
+parhigh[0]= funhigh->GetParameter(0);
+parhigh[1]= funhigh->GetParameter(1);
+parhigh[2]= funhigh->GetParameter(2);
+  //output_file->cd();
+  //output_file->Write();
+  //output_file->Close();
+for(int m=0;m<3;m++){
+cout<<"parlowi="<<m<<"  "<<parlow[m]<<endl;
+cout<<"parhighi="<<m<<"  "<<parhigh[m]<<endl;
+}
+        if (kSaveRootFile){
+           rootfile->Append(Qsq_x_Theta_p_hist); 
+           rootfile->Append(Qsq_x_Theta_p_nobkg_hist); 
+           //rootfile->Append(Qsq_x_Theta_p_precut_hist); 
+           for(int m=0;m<13;m++){ 
+            rootfile->Append(Qsq_x_Theta_p_precut_hist[m]); 
+            rootfile->Append(Qsq_x_Theta_p_precut_nobkg_hist[m]); 
+           }
+           rootfile->Append(Qsq_x_Theta_p_cut_hist); 
+           rootfile->Append(Qsq_x_Theta_p_cut_nobkg_hist); 
+           rootfile->Write();
+         }   
+    watch.Stop();
+    //printf("Total Time %3.4f min \n Completed, Exit now :) \n",watch.RealTime()/60);
+    theApp.Run();
+      if (kSaveRootFile){
+        rootfile->Close();
+      }
+    return(1);
+
+  }
+  
+  void LoadEC_map(TString map_file){
+    //std. map file in the svn repo  ../layout/map_FAEC_ANL_20130628.txt
+    ifstream INPUT_file;
+    INPUT_file.open(map_file.Data());
+    if(!INPUT_file){ 
+      printf("ERROR!!! Can't open %s \n",map_file.Data());	
+      exit(1);
+    }
+    
+    
+    
+    //load x,y locations and block id
+    Double_t total_module=0;
+    Int_t counter_id=0;
+    for(int i=0;i<54;i++){ //54 rows
+      INPUT_file>>num_module_in_row[i];
+      //std::cout<<num_module_in_row[i]<<" ";
+      num_module_in_row[i]=num_module_in_row[i]-1;  //first one is y coordinate
+      total_module+=num_module_in_row[i];
+      Double_t tmp_y;
+      INPUT_file>>tmp_y;
+      y_bak[i]=tmp_y;       //make a backup in order to judge which row a certain particle hits the EC
+      for(Int_t j=0;j<num_module_in_row[i];j++){
+	INPUT_file>>x[i][j];
+	y[i][j]=tmp_y;     // in each row , y coordinate is the same
+	counter_id++;
+	id[i][j]=counter_id;
+	//update the pair array
+	block_map[counter_id].first = i;
+	block_map[counter_id].second = j;
+	//printf("DEBUG EC map update : ecal id %i [%i,%i],[%f,%f] \n",counter_id,j,i,x[i][j],y[i][j]);//vec_ecalBlock.Px(),vec_ecalBlock.Py()
+      //sector
+      TVector2 vec(x[i][j],y[i][j]);
+      Double_t phi_module=vec.Phi();
+      for(int k=0;k<30;k++){   //30 sectors
+	if(phi_module>=k*12.0/180.0*3.141592 && phi_module<(k+1.0)*12.0/180.0*3.141592){  //sector k
+	  sector[i][j]=k+1;
+	  // 				    cout << sector[i][j] << endl;				
+	}
+      }
+      
+      }
+  }
+  printf("Total ECAL Modules loaded %i \n",counter_id);
+  
+  
+  Int_t total_module_active=0;
+  for(Int_t i=0;i<54;i++){
+    for(Int_t j=0;j<num_module_in_row[i];j++){
+      status[i][j]=1; //all active for PVDIS FAEC
+      if (status[i][j]==1) total_module_active++;
+    }
+  }
+  
+  
+  
+  
+};
+
+TVector2 GetECALBlock_coord(Int_t block_id){
+  Int_t idx=-1,idy=-1;
+  TVector2 vec_ecalBlock;
+  idx = block_map[block_id].second;
+  idy = block_map[block_id].first;
+  vec_ecalBlock.Set(floor(x[idy][idx]*100+0.5)/100,floor(y[idy][idx]*100+0.5)/100); 
+  //printf("DEBUG : ecal id %i [%i,%i],[%f,%f] \n",block_id,idx,idy,x[idy][idx],y[idy][idx]);//vec_ecalBlock.Px(),vec_ecalBlock.Py()
+      return vec_ecalBlock;
+};
+
+Int_t GetECALBlock_sector(Int_t block_id){
+  Int_t idx = block_map[block_id].second;
+  Int_t idy = block_map[block_id].first;
+  
+  return sector[idy][idx];
+};
+
+Int_t GetECALCluser(Int_t block_id,Int_t *cluster_edep_blockid){
+  Int_t hit_idx = block_map[block_id].second;
+  Int_t hit_idy = block_map[block_id].first;
+  Int_t hit_around_idx[6]={100000};      //around 6 modules, a variable label indicates how many surrounded modules are around the hitted module
+  Int_t hit_around_idy[6]={100000};
+  //__________________________________find the surrounded other 6 modules________________________
+  Int_t tmp_idx[15]={hit_idx-7, hit_idx-6, hit_idx-5, hit_idx-4, hit_idx-3, hit_idx-2, hit_idx-1, hit_idx, hit_idx+1, hit_idx+2, hit_idx+3, hit_idx+4, hit_idx+5, hit_idx+6, hit_idx+7};
+  Int_t tmp_idy[3]={hit_idy-1, hit_idy, hit_idy+1};
+  Int_t label=0;
+  for(Int_t i=0;i<15;i++){// x scan
+    for(Int_t j=0;j<3;j++){  //y scan
+      if(tmp_idy[j]>=0 && tmp_idy[j]<54 && tmp_idx[i]>=0 && tmp_idx[i]<num_module_in_row[tmp_idy[j]] && (tmp_idx[i]!=hit_idx || tmp_idy[j]!=hit_idy) ){ // in range
+	if(sqrt( pow( (x[tmp_idy[j]][tmp_idx[i]]-x[hit_idy][hit_idx]),2 )+ pow((y[tmp_idy[j]][tmp_idx[i]]-y[hit_idy][hit_idx]),2 ))<15.0){
+	  hit_around_idx[label]=tmp_idx[i];
+	  hit_around_idy[label]=tmp_idy[j];
+	  label++;
+	}
+      }
+    }
+  }
+  cluster_edep_blockid[0] = id[hit_idy][hit_idx];
+  for(int l=0;l<label;l++){
+    cluster_edep_blockid[l+1]=id[hit_around_idy[l]][hit_around_idx[l]];
+  }
+  return label;
+};
+
+
+TGraphErrors * GetRMSReolution(TH2F * Difference){
+  assert(Difference);
+  
+  TH1D * hpt = Difference->ProjectionX();
+  
+  int cnt = 0;
+  Double_t pt[1000] = { 0 };
+  Double_t resolution[2][1000]={0};
+  Double_t resolution_error[2][1000]={0};
+  Double_t fit_range_up[1000] = { 0 };
+  Double_t fit_range_low[1000] = { 0 };
+  //TCanvas *c2 = new TCanvas("GetEnergyRes2", "GetEnergyRes2", 800 * 1.5, 600 * 1);//DEBUG
+    for ( int i = 0; i < Difference->GetNbinsX() / 4; i++ )
+    {
+      //pt[cnt] = Difference->GetXaxis()->GetBinCenter(i * 10 + 10 / 2);//in GeV
+    
+    TH1D * proj = Difference->ProjectionY("_py", i * 10 + 1, (i + 1) * 10);
+    
+    if ( proj->GetSum() > 100 )//check for entries
+    {
+      pt[cnt] = Difference->GetXaxis()->GetBinCenter(i * 10 + 10 / 2);//in GeV
+      
+      Double_t fit_range_up=1.2;
+      Double_t fit_range_low=1.5;   
+      
+      TF1 * gaus = new TF1("gausEoverP", "gaus", fit_range_low, fit_range_up);
+      
+      proj -> Fit(gaus, "R0");
+      resolution[0][cnt] = gaus->GetParameter(2)/gaus->GetParameter(1);//RMS[cnt];
+      resolution[1][cnt] = proj->GetRMS()/proj->GetMean();
+      resolution_error[0][cnt] = TMath::Sqrt(TMath::Power(gaus->GetParError(1)/gaus->GetParameter(1),2)+TMath::Power(gaus->GetParError(2)/gaus->GetParameter(2),2))*resolution[0][cnt];//RMSErr[cnt];
+      resolution_error[1][cnt] = TMath::Sqrt(TMath::Power(proj->GetRMSError(),2)+TMath::Power(proj->GetMeanError(),2));//proj->GetRMSError()/proj->GetMean();
+      cnt++;
+      
+      
+    }
+    
+    delete proj;
+    }
+    
+    //    delete Difference;
+    TGraphErrors * gptRMS = new TGraphErrors(cnt, pt, resolution[0], 0, resolution_error[0]);
+    gptRMS -> SetLineWidth(3);
+    gptRMS -> Draw("*A");
+    gptRMS -> GetYaxis()->CenterTitle();
+    
+    // degub print
+    for(Int_t i=0;i<cnt;i++){
+    }
+    
+    return gptRMS;  
+};
+
+Int_t GetRadiusIndex(Double_t radius){
+  Int_t Ri=8;
+  for (Int_t i =0; i<8;i++){
+    if (radius>trig_low_R[i] && radius<=trig_high_R[i]){
+      Ri=i;
+      break;
+    }
+  }
+  return Ri;
+};
+
+Double_t GetThreshold6p1(Double_t radius){
+  Double_t thresh=0;
+  if (radius<trig_low_R[0] || radius>trig_high_R[5]){
+    thresh=11000;//set a high number so that R below the ecal limit will be rejected
+    //thresh=0;
+    return thresh;
+  } else {
+    for(Int_t i=0;i<8;i++){
+      if(radius>trig_low_R[i] && radius<=trig_high_R[i]){
+	thresh=trig_thresh_6p1[i];
+	break;
+      }       
+    }
+  }
+  return thresh;
+};
+Double_t Calfactor(Double_t edep){
+  Double_t factor=0;
+  Double_t convertE=edep/1000.0;
+  if (edep<0){
+    factor=0;
+    
+    return factor;
+  } else {    
+    factor=(0.190176+0.00815213*convertE-0.00044322*convertE*convertE);	
+  }       
+  
+  return factor;
+};
+
+void set_plot_style()
+{
+  const Int_t NRGBs = 5;
+  const Int_t NCont = 255;
+  
+  Double_t stops[NRGBs] = { 0.00, 0.34, 0.61, 0.84, 1.00 };
+  Double_t red[NRGBs]   = { 0.00, 0.00, 0.87, 1.00, 0.51 };
+  Double_t green[NRGBs] = { 0.00, 0.81, 1.00, 0.20, 0.00 };
+  Double_t blue[NRGBs]  = { 0.51, 1.00, 0.12, 0.00, 0.00 };
+  TColor::CreateGradientColorTable(NRGBs, stops, red, green, blue, NCont);
+  gStyle->SetNumberContours(NCont);
+}
+/*void LoadBackgrounds(){
+  //Load the background in to memory
+  //background tree for now this works with merged bkg.
+  ecalPSMap.clear();
+  ecalShMap.clear();
+  
+  TVector2 vec_ecalBlock;
+  Int_t nentries;
+  Bool_t Fillecal=kFALSE;  
+  
+  Double_t pf;//for GEM
+  Int_t i_pf=0;//for GEM plane hit index
+  Double_t th;//for GEM
+  Double_t r;//for GEM
+  Double_t X[2];//for GEM hit coordinates
+  
+  Int_t evnum=-1;
+  
+  const Double_t DEG=180./3.1415926;
+  Int_t counttracks=0;
+  
+  Bool_t processWindow=kFALSE;//when all the events in a single window are filled to the ecal, start cluster processing
+  //TFile *filebkg=new TFile("/work/halla/solid/tianye/solid_simulation/solid/subsystem/ec/mergeBKG/mergetree_SIDIS_allpions_total_test.root");
+  TFile *filebkg=new TFile("/work/halla/solid/tianye/solid_simulation/solid/subsystem/ec/mergeBKG/mergetree_SIDIS_allpions_total_final.root");
+  
+  //event info
+  TTree *TGEMC_Flux_bkg = (TTree*) filebkg->Get("output_flux");
+  TTree *TGEMC_EM_bkg = (TTree*) filebkg->Get("output_solid_ec");
+  TTree *TGEMC_Generate_bkg = (TTree*) filebkg->Get("output_generate");
+  
+  TGEMC_Generate_bkg->SetBranchAddress("simpid", &fEv_simpid);
+  TGEMC_Generate_bkg->SetBranchAddress("ev.evtimestamp", &fEvTimeStamp);
+  TGEMC_Generate_bkg->SetBranchAddress("ev.evtimewindow", &fEvTimeWindow);
+  //ecal sum hits
+  TGEMC_Flux_bkg->SetBranchAddress("hitn", &flux_hitn);
+  TGEMC_Flux_bkg->SetBranchAddress("id", &flux_id);
+  TGEMC_Flux_bkg->SetBranchAddress("pid", &flux_pid);
+  TGEMC_Flux_bkg->SetBranchAddress("mpid", &flux_mpid);
+  TGEMC_Flux_bkg->SetBranchAddress("tid", &flux_tid);
+  TGEMC_Flux_bkg->SetBranchAddress("mtid", &flux_mtid);
+  TGEMC_Flux_bkg->SetBranchAddress("otid", &flux_otid);
+  TGEMC_Flux_bkg->SetBranchAddress("trackE", &flux_trackE);
+  TGEMC_Flux_bkg->SetBranchAddress("totEdep", &flux_totEdep);
+  TGEMC_Flux_bkg->SetBranchAddress("avg_x", &flux_avg_x);
+  TGEMC_Flux_bkg->SetBranchAddress("avg_y", &flux_avg_y);
+  TGEMC_Flux_bkg->SetBranchAddress("avg_z", &flux_avg_z);
+  TGEMC_Flux_bkg->SetBranchAddress("avg_lx", &flux_avg_lx);
+  TGEMC_Flux_bkg->SetBranchAddress("avg_ly", &flux_avg_ly);
+  TGEMC_Flux_bkg->SetBranchAddress("avg_lz", &flux_avg_lz);
+  TGEMC_Flux_bkg->SetBranchAddress("px", &flux_px);
+  TGEMC_Flux_bkg->SetBranchAddress("py", &flux_py);
+  TGEMC_Flux_bkg->SetBranchAddress("pz", &flux_pz);
+  TGEMC_Flux_bkg->SetBranchAddress("vx", &flux_vx);
+  TGEMC_Flux_bkg->SetBranchAddress("vy", &flux_vy);
+  TGEMC_Flux_bkg->SetBranchAddress("vz", &flux_vz);
+  TGEMC_Flux_bkg->SetBranchAddress("mvx", &flux_mvx);
+  TGEMC_Flux_bkg->SetBranchAddress("mvy", &flux_mvy);
+  TGEMC_Flux_bkg->SetBranchAddress("mvz", &flux_mvz);
+  TGEMC_Flux_bkg->SetBranchAddress("avg_t", &flux_avg_t);
+  
+  
+  TGEMC_EM_bkg->SetBranchAddress("hitn", &solid_ec_hitn);
+  TGEMC_EM_bkg->SetBranchAddress("id", &solid_ec_id);
+  TGEMC_EM_bkg->SetBranchAddress("pid", &solid_ec_pid);
+  TGEMC_EM_bkg->SetBranchAddress("mpid", &solid_ec_mpid);
+  TGEMC_EM_bkg->SetBranchAddress("tid", &solid_ec_tid);
+  TGEMC_EM_bkg->SetBranchAddress("mtid", &solid_ec_mtid);
+  TGEMC_EM_bkg->SetBranchAddress("otid", &solid_ec_otid);
+  TGEMC_EM_bkg->SetBranchAddress("trackE", &solid_ec_trackE);
+  TGEMC_EM_bkg->SetBranchAddress("totEdep", &solid_ec_totEdep);
+  TGEMC_EM_bkg->SetBranchAddress("avg_x", &solid_ec_avg_x);
+  TGEMC_EM_bkg->SetBranchAddress("avg_y", &solid_ec_avg_y);
+  TGEMC_EM_bkg->SetBranchAddress("avg_z", &solid_ec_avg_z);
+  TGEMC_EM_bkg->SetBranchAddress("avg_lx", &solid_ec_avg_lx);
+  TGEMC_EM_bkg->SetBranchAddress("avg_ly", &solid_ec_avg_ly);
+  TGEMC_EM_bkg->SetBranchAddress("avg_lz", &solid_ec_avg_lz);
+  TGEMC_EM_bkg->SetBranchAddress("px", &solid_ec_px);
+  TGEMC_EM_bkg->SetBranchAddress("py", &solid_ec_py);
+  TGEMC_EM_bkg->SetBranchAddress("pz", &solid_ec_pz);
+  TGEMC_EM_bkg->SetBranchAddress("vx", &solid_ec_vx);
+  TGEMC_EM_bkg->SetBranchAddress("vy", &solid_ec_vy);
+  TGEMC_EM_bkg->SetBranchAddress("vz", &solid_ec_vz);
+  TGEMC_EM_bkg->SetBranchAddress("mvx", &solid_ec_mvx);
+  TGEMC_EM_bkg->SetBranchAddress("mvy", &solid_ec_mvy);
+  TGEMC_EM_bkg->SetBranchAddress("mvz", &solid_ec_mvz);
+  TGEMC_EM_bkg->SetBranchAddress("avg_t", &solid_ec_avg_t);
+  
+  
+  total_ecalShMap.clear();
+  total_ecalPSMap.clear();
+  
+  nentries = (Int_t)TGEMC_Generate_bkg->GetEntries();
+  printf("Merged Background Entries = %i \n",nentries);
+  Double_t totEdep_shower=0;
+  Double_t totEdep_preshower=0;
+  Fillecal=kFALSE;  
+  processWindow=kFALSE;//when all the events in a single window are filled to the ecal, start cluster processing
+  Double_t pf_flux_bkg;
+  for (int i=0; (i<nentries); i++) {
+    TGEMC_Flux_bkg->GetEntry(i); 
+    TGEMC_EM_bkg->GetEntry(i); 
+    TGEMC_Generate_bkg->GetEntry(i);  
+    //cout<<"fEvTimeWindow="<<fEvTimeWindow<<endl;
+    if (fTimeWindow<fEvTimeWindow){//entered into new time window
+      //printf("new trig. window %i %i %i \n",i,fTimeWindow,fEvTimeWindow);
+      fTimeWindow=fEvTimeWindow;
+      //cout<<"here"<<endl;
+      i--;
+      processWindow=kTRUE;
+      Fillecal=kFALSE; 
+    }else{//still in the current window so access single events
+      pf=0;
+      Fillecal=kFALSE;  
+      if (fEv_simpid==1 || fEv_simpid==111){
+	Fillecal=kTRUE; 
+	//cout<<"e=="<<endl;  
+      } 
+      else if(TMath::Abs(fEv_simpid)==211) {
+	for (int j = 0; j<flux_hitn; j++){
+	  FluxHit_detector_ID=flux_id[j]/1000000;
+	  FluxHit_subdetector_ID=(flux_id[j]%1000000)/100000;
+	  FluxHit_subsubdetector_ID=((flux_id[j]%1000000)%100000)/10000;
+	  FluxHit_component_ID=flux_id[j]%10000;
+	  pf_flux_bkg=TMath::Sqrt(TMath::Power(flux_px[j],2)+TMath::Power(flux_py[j],2)+TMath::Power(flux_pz[j],2));
+	  if (FluxHit_detector_ID==3 && FluxHit_subdetector_ID == 1 && FluxHit_subsubdetector_ID == 1 &&  pf_flux_bkg>0 && pf_flux_bkg<=12000){
+	    //cout<<"pf_flux_id="<<flux_id[j]<<endl;
+	    Fillecal=kTRUE;  
+	    break;
+	  }
+	}
+      }
+      
+      if (Fillecal){   
+	for (int j = 0; j<solid_ec_hitn; j++){
+	  ECHit_detector_ID=solid_ec_id[j]/1000000;
+	  ECHit_subdetector_ID=(solid_ec_id[j]%1000000)/100000;
+	  ECHit_subsubdetector_ID=((solid_ec_id[j]%1000000)%100000)/10000;
+	  ECHit_component_ID=solid_ec_id[j]%10000;
+	  
+	  if (ECHit_detector_ID==3 && ECHit_subdetector_ID == 1 && ECHit_subsubdetector_ID == 0){//shower 
+	    if (solid_ec_avg_z[j]>2000){
+	      //EC_averagex=solid_ec_avg_x[j]*0.1;
+	      //EC_averagey=solid_ec_avg_y[j]*0.1;
+	      //EC_localx=solid_ec_avg_lx[j]*0.1;
+	      //EC_localy=solid_ec_avg_ly[j]*0.1;
+	      totEdep_shower+=solid_ec_totEdep[j];
+	      
+	      if (ecalShMap.count(ECHit_component_ID)){
+		ecalShMap[ECHit_component_ID]+=solid_ec_totEdep[j];// MeV
+	      } else {
+		ecalShMap[ECHit_component_ID]=solid_ec_totEdep[j];// MeV
+	      }
+	    } //end shower 
+	  }
+	  //cout<<"event="<<i<<"E_preshower="<<totEdep_shower<<endl;
+	  if (ECHit_detector_ID==3 && ECHit_subdetector_ID == 1 && ECHit_subsubdetector_ID == 1){//pershower
+	    if (solid_ec_avg_z[j]>2000){
+	      totEdep_preshower+=solid_ec_totEdep[j];
+	      if (ecalPSMap.count(ECHit_component_ID)){
+		ecalPSMap[ECHit_component_ID]+=solid_ec_totEdep[j];// MeV
+	      } else {
+		ecalPSMap[ECHit_component_ID]=solid_ec_totEdep[j];// MeV
+	      }
+	    }//end preshower
+	  }
+	  
+	}//end EChit loop
+	
+	
+	
+      }//end of fillecal
+      
+      //after filling ecal object with ecal hits for 30 ns window now add these objects to the vector
+      if (processWindow){ 
+	//add ecal objects 
+	total_ecalShMap.push_back(ecalShMap);
+	total_ecalPSMap.push_back(ecalPSMap);
+	processWindow=kFALSE;//reset till next window is filled
+	//cout<<"here"<<endl;
+	//clear objects that reset after 30 ns window
+	ecalShMap.clear();//empty the ecalMap
+	ecalPSMap.clear();//empty the ecalMap
+      }//end of processWindow
+      
+      
+    }//end of if (fTimeWindow<fEvTimeWindow)
+    
+    if (i>100000 && bEarlyBeakBkg)
+      break;
+    
+    if (i%1000000==0)
+      printf("Background Event %d \n",i);
+    
+  }//end of nentries
+  //cout<<"total_ecalPSMap.size()="<<total_ecalPSMap.size()<<endl;
+  printf("Total Background Trigger windows (@ %3.0f ns) available %d \n",TriggerWindow, total_ecalPSMap.size());
+  
+  //end of background. It's in the memory
+};*/
+void LoadBackgrounds(){
+  //Load the background in to memory
+   //background tree for now this works with merged bkg.
+  ecalPSMap.clear();
+  ecalShMap.clear();
+
+  TVector2 vec_ecalBlock;
+  Int_t nentries[5];
+  Bool_t Fillecal=kFALSE;  
+  
+  Double_t pf;//for GEM
+  Int_t i_pf=0;//for GEM plane hit index
+  Double_t th;//for GEM
+  Double_t r;//for GEM
+  Double_t X[2];//for GEM hit coordinates
+
+  Int_t evnum=-1;
+  TFile *filebkg[5];
+  TTree *TGEMC_Generate_bkg[5];
+  TTree *TGEMC_Flux_bkg[5];
+  TTree *TGEMC_EM_bkg[5];
+  TTree *TGEMC_ECPS_bkg[5];
+  const Double_t DEG=180./3.1415926;
+  Int_t counttracks=0;
+ // double detlaT = 6.13711543300417939e-05;
+ double detlaT = 0.035183270; //HallD pim
+  double event_time=0.0;
+  double time_windows=0;
+  Bool_t processWindow=kFALSE;//when all the events in a single window are filled to the ecal, start cluster processing
+  //filebkg[0]=new TFile("/volatile/halla/solid/tianye/container/pimBggen_all_rod_6mm_6GeV_osg/pimBggen_all_rod_6mm_6GeV_osg_2000files_6e6.root");
+  //filebkg[0]=new TFile("/cache/halla/solid/user/tianye/container/pimBggen_all_rod_6mm/pimBggen_all_rod_6mm_995files.root");
+  //filebkg[1]=new TFile("/cache/halla/solid/user/tianye/container/pimBggen_all_rod_6mm_2/pimBggen_all_rod_6mm_2_991file.root");
+  //filebkg[2]=new TFile("/cache/halla/solid/user/tianye/container/pimBggen_all_rod_6mm_3/pimBggen_all_rod_6mm_993files.root");
+  filebkg[0]=new TFile("/lustre19/expphy/volatile/halla/solid/tianye/container/pimBggen_all_rod_6mm_gem2.5_1/pimBggen_all_rod_6mm_995files_new_new.root");
+  filebkg[1]=new TFile("/lustre19/expphy/volatile/halla/solid/tianye/container/pimBggen_all_rod_6mm_gem2.5/pimBggen_all_rod_6mm_2_991file_new.root");
+  filebkg[2]=new TFile("/lustre19/expphy/volatile/halla/solid/tianye/container/pimBggen_all_rod_6mm_gem2.5_3/pimBggen_all_rod_6mm_3_993files_new.root");
+   //filebkg[0]=new TFile("/volatile/halla/solid/tianye/container/pimBggen_alldet_4/pimBggen_alldet_1000files_3e6.root");
+   //filebkg[0]=new TFile("/volatile/halla/solid/tianye/container/pimBggen_all_rod_25mm_right/pimBggen_all_rod_25mm_1000files_3e6.root");
+  
+   //event info
+  total_ecalShMap.clear();
+  total_ecalPSMap.clear();
+  total_ecalShMapbkg.clear();
+  total_ecalPSMapbkg.clear();
+  double pid_gen_bkg=0;
+  double bkg_number=0;
+  for(int n=0;n<3;n++){
+  TGEMC_Generate_bkg[n] = (TTree*) filebkg[n]->Get("generated");
+  
+  TGEMC_Generate_bkg[n]->SetBranchAddress("pid",&fGen_pid);
+  TGEMC_Generate_bkg[n]->SetBranchAddress("px",&fGen_Px);
+  TGEMC_Generate_bkg[n]->SetBranchAddress("py",&fGen_Py);
+  TGEMC_Generate_bkg[n]->SetBranchAddress("pz",&fGen_Pz);
+  TGEMC_Generate_bkg[n]->SetBranchAddress("vx",&fGen_vx);
+  TGEMC_Generate_bkg[n]->SetBranchAddress("vy",&fGen_vy);
+  TGEMC_Generate_bkg[n]->SetBranchAddress("vz",&fGen_vz);
+  
+  TGEMC_Flux_bkg[n]  = (TTree*) filebkg[n]->Get("flux");
+  
+  TGEMC_Flux_bkg[n]->SetBranchAddress("hitn",&fFluxHit_n);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("id",&fFluxHit_id);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("pid",&fFluxHit_pid);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("mpid",&fFluxHit_mpid);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("mtid",&fFluxHit_mtid);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("tid",&fFluxHit_tid);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("trackE",&fFluxHit_trackE);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("avg_x",&fFluxHit_Avg_x);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("avg_y",&fFluxHit_Avg_y);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("avg_z",&fFluxHit_Avg_z);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("px",&fFluxHit_Px);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("py",&fFluxHit_Py);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("pz",&fFluxHit_Pz);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("avg_t",&fFluxHit_T);
+  TGEMC_Flux_bkg[n]->SetBranchAddress("vz",&fFluxHit_vz);
+  
+  TGEMC_EM_bkg[n] = (TTree*) filebkg[n]->Get("solid_ec");
+  
+  TGEMC_EM_bkg[n]->SetBranchAddress("id",&fECHit_id);
+  TGEMC_EM_bkg[n]->SetBranchAddress("totEdep",&fECHit_totEdep);
+  TGEMC_EM_bkg[n]->SetBranchAddress("totEdepB",&fECHit_totEdepB);
+  TGEMC_EM_bkg[n]->SetBranchAddress("totEend",&fECHit_totEend);
+  TGEMC_EM_bkg[n]->SetBranchAddress("avg_z",&fECHit_Avg_z);
+  TGEMC_EM_bkg[n]->SetBranchAddress("mpid",&fECHit_mpid);
+  TGEMC_EM_bkg[n]->SetBranchAddress("tid",&fECHit_tid);
+  TGEMC_EM_bkg[n]->SetBranchAddress("mtid",&fECHit_mtid); 
+  TGEMC_EM_bkg[n]->SetBranchAddress("avg_lx",&fECHit_Avg_lx);
+  TGEMC_EM_bkg[n]->SetBranchAddress("avg_ly",&fECHit_Avg_ly);
+  TGEMC_EM_bkg[n]->SetBranchAddress("avg_lz",&fECHit_Avg_lz);
+  TGEMC_EM_bkg[n]->SetBranchAddress("avg_x",&fECHit_Avg_x);
+  TGEMC_EM_bkg[n]->SetBranchAddress("avg_y",&fECHit_Avg_y);
+
+  TGEMC_ECPS_bkg[n] = (TTree*) filebkg[n]->Get("solid_ec_ps");
+  TGEMC_ECPS_bkg[n]->SetBranchAddress("id",&fECPSHit_id);
+  TGEMC_ECPS_bkg[n]->SetBranchAddress("totEdep",&fECPSHit_totEdep);
+  TGEMC_ECPS_bkg[n]->SetBranchAddress("totEdepB",&fECPSHit_totEdepB);
+  TGEMC_ECPS_bkg[n]->SetBranchAddress("totEend",&fECPSHit_totEend);
+  TGEMC_ECPS_bkg[n]->SetBranchAddress("avg_z",&fECPSHit_Avg_z);
+  TGEMC_ECPS_bkg[n]->SetBranchAddress("mpid",&fECPSHit_mpid);
+  TGEMC_ECPS_bkg[n]->SetBranchAddress("tid",&fECPSHit_tid);
+  TGEMC_ECPS_bkg[n]->SetBranchAddress("mtid",&fECPSHit_mtid); 
+  TGEMC_ECPS_bkg[n]->SetBranchAddress("avg_lx",&fECPSHit_Avg_lx);
+  TGEMC_ECPS_bkg[n]->SetBranchAddress("avg_ly",&fECPSHit_Avg_ly);
+  TGEMC_ECPS_bkg[n]->SetBranchAddress("avg_lz",&fECPSHit_Avg_lz);
+  TGEMC_ECPS_bkg[n]->SetBranchAddress("avg_x",&fECPSHit_Avg_x);
+  TGEMC_ECPS_bkg[n]->SetBranchAddress("avg_y",&fECPSHit_Avg_y);
+
+  //total_ecalShMap.clear();
+  //total_ecalPSMap.clear();
+  nentries[n] = (Int_t)TGEMC_Generate_bkg[n]->GetEntries();
+  printf("Merged Background Entries = %i \n",nentries[n]);
+  Double_t totEdep_shower=0;
+  Double_t totEdep_preshower=0;
+  Fillecal=kFALSE;  
+
+  processWindow=kFALSE;//when all the events in a single window are filled to the ecal, start cluster processing
+  Double_t pf_flux_bkg;
+  for (int i=0; i<nentries[n]; i++) {
+    TGEMC_Flux_bkg[n]->GetEntry(i); 
+    TGEMC_EM_bkg[n]->GetEntry(i); 
+    TGEMC_Generate_bkg[n]->GetEntry(i);  
+    TGEMC_ECPS_bkg[n]->GetEntry(i);  
+    event_time +=detlaT;
+    time_windows = int(event_time/TriggerWindow);
+     if(fTimeWindow<time_windows){
+
+        fTimeWindow=time_windows;
+        i--;
+        processWindow=kTRUE;
+      //  cout<<"event="<<i<<"timewindows="<<fTimeWindow<<"Evtime_windows="<<time_windows<<endl;
+       }else{
+            Fillecal=kFALSE;
+	  for (int j = 0; j<fFluxHit_id->size(); j++){
+            FluxHit_detector_ID=fFluxHit_id->at(j)/1000000;
+            FluxHit_subdetector_ID=(fFluxHit_id->at(j)%1000000)/100000;
+            FluxHit_subsubdetector_ID=((fFluxHit_id->at(j)%1000000)%100000)/10000;
+            FluxHit_component_ID=fFluxHit_id->at(j)%10000;  
+            pf_flux_bkg=TMath::Sqrt(TMath::Power(fFluxHit_Px->at(j),2)+TMath::Power(fFluxHit_Py->at(j),2)+TMath::Power(fFluxHit_Pz->at(j),2));
+           if (FluxHit_detector_ID==3 && FluxHit_subdetector_ID == 1 && FluxHit_subsubdetector_ID == 1 && pf_flux_bkg>0 && pf_flux_bkg<=12000 && fFluxHit_Px->at(j)>0){
+              //if(fFluxHit_pid->at(j)==11 && pf_flux_bkg>1000){
+              // Fillecal=kFALSE;
+              // }else 
+              Fillecal=kTRUE;
+                
+	      break;
+	   
+          }
+        }
+      if (Fillecal){
+	 bkg_number+=1;
+       //processWindow=kTRUE;
+       totEdep_shower=0;
+       totEdep_preshower=0; 
+      for (int j = 0; j<fECHit_id->size(); j++){
+	ECHit_detector_ID=fECHit_id->at(j)/1000000;
+	ECHit_subdetector_ID=(fECHit_id->at(j)%1000000)/100000;
+	ECHit_subsubdetector_ID=((fECHit_id->at(j)%1000000)%100000)/10000;
+	ECHit_component_ID=fECHit_id->at(j)%10000;
+	if (ECHit_detector_ID==3 && ECHit_subdetector_ID == 1 && ECHit_subsubdetector_ID == 0){//shower 
+	  //totEdep_shower+=fECHit_totEdepB->at(j);
+	  totEdep_shower+=fECHit_totEend->at(j);
+         //cout<<"ECHit_component_ID="<<ECHit_component_ID<<"totEdep_shower="<<totEdep_shower<<endl;
+	  if (ecalShMapbkg.count(ECHit_component_ID)){
+	    //ecalShMapbkg[ECHit_component_ID]+=fECHit_totEdepB->at(j);//5794;//106;// MeV
+	    ecalShMapbkg[ECHit_component_ID]+=fECHit_totEend->at(j);//5794;//106;// MeV
+	  } else {
+	    //ecalShMapbkg[ECHit_component_ID]=fECHit_totEdepB->at(j);//5794;//106;// MeV
+	    ecalShMapbkg[ECHit_component_ID]=fECHit_totEend->at(j);//5794;//106;// MeV
+	  }
+         //cout<<"totEdep_shower="<<totEdep_shower<<endl;
+       }
+     }
+      for (int k = 0; k<fECPSHit_id->size(); k++){
+	ECPSHit_detector_ID=fECPSHit_id->at(k)/1000000;
+	ECPSHit_subdetector_ID=(fECPSHit_id->at(k)%1000000)/100000;
+	ECPSHit_subsubdetector_ID=((fECPSHit_id->at(k)%1000000)%100000)/10000;
+	ECPSHit_component_ID=fECPSHit_id->at(k)%10000;
+        //cout<<"event="<<i<<"E_preshower="<<totEdep_shower<<endl;
+	if (ECPSHit_detector_ID==3 && ECPSHit_subdetector_ID == 1 && ECPSHit_subsubdetector_ID == 1){//pershower
+	  //totEdep_preshower+=fECPSHit_totEdepB->at(k);
+	  totEdep_preshower+=fECPSHit_totEend->at(k);
+	  if (ecalPSMapbkg.count(ECPSHit_component_ID)){
+	    //ecalPSMapbkg[ECPSHit_component_ID]+=fECPSHit_totEdepB->at(k);// MeV
+	    ecalPSMapbkg[ECPSHit_component_ID]+=fECPSHit_totEend->at(k);// MeV
+	  } else {
+	    //ecalPSMapbkg[ECPSHit_component_ID]=fECPSHit_totEdepB->at(k);// MeV
+	    ecalPSMapbkg[ECPSHit_component_ID]=fECPSHit_totEend->at(k);// MeV
+	  }
+       }
+      }//end EChit loop
+    }//end of fillecal
+
+      //after filling ecal object with ecal hits for 30 ns window now add these objects to the vector
+      if (processWindow){ 
+	//add ecal objects 
+	total_ecalShMapbkg.push_back(ecalShMapbkg);
+	total_ecalPSMapbkg.push_back(ecalPSMapbkg);
+	processWindow=kFALSE;//reset till next window is filled
+
+	//clear objects that reset after 30 ns window
+	ecalShMapbkg.clear();//empty the ecalMap
+	ecalPSMapbkg.clear();//empty the ecalMap
+      }//end of processWindow
+
+    }//end of if (fTimeWindow<fEvTimeWindow)
+     
+    if (i>100000 && bEarlyBeakBkg)
+      break;
+
+    if (i%1000000==0)
+      printf("Background Event %d \n",i);
+    
+  }//end of nentries
+}
+     
+ // cout<<"total_ecalPSMap.size()="<<total_ecalPSMap.size()<<endl;
+  printf("Total no 6p1 max Background Trigger windows (@ %3.0f ns) available %d \n",TriggerWindow, total_ecalPSMapbkg.size());
+
+  //end of background. It's in the memory
+};
+
+void getBkgEdepPS(Int_t rndnum){//this routine will fill ecalPSMap with background signals
+  ecalPSMapbkg = total_ecalPSMapbkg[rndnum];
+};
+void getBkgEdepSh(Int_t rndnum){//this routine will fill ecalShMap with background signals
+  ecalShMapbkg = total_ecalShMapbkg[rndnum];
+};	   
