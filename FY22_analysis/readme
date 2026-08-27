@@ -1,0 +1,10 @@
+#To get the analysis root file:
+root 'fileReducer_beamtest_gem_survey.C+("/your_dir/*.root",1,total_thrown_event_number,0)'
+#Analyze the root file to get SC_B rate (for example)
+root -l ~/Downloads/merged_30000_50000_reduce_tree_analysis_2022.root 
+T->Draw("SC_B_Eendsum>>hist1(100,0,10)","rate*1e-3*(SC_B_Eendsum>1.46)","HIST")
+hist1->Integral()
+(double) 43781.250
+root [3] 43781.250/50. (the SC_B area is 5x10cm2)
+(double) 875.62500 kHz/cm2
+
