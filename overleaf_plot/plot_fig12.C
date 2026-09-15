@@ -31,16 +31,15 @@ void plot_fig12(){
 	TFile *f6 = new TFile("/w/halla-scshelf2102/solid/tianye/solid_simulation/solid/subsystem/ec/analysis/ecal_HallDpim_all_cluster_noTimeWindow_normalized_rate_2023_pimbkg_Eend_11GeV.root");
 	TFile *f16 = new TFile("/w/halla-scshelf2102/solid/tianye/solid_simulation/solid/subsystem/ec/analysis/ecal_pimbkg_eAll_trigger_Eend_pL1800_11GeV_2023_Q2L2X30p1600.root");
 	TFile *f17 = new TFile("/w/halla-scshelf2102/solid/tianye/solid_simulation/solid/subsystem/ec/analysis/ecal_BeamonTargetEM_all_cluster_noTimeWindow_normalized_rate_Eend.root");
-	TFile *f2 = new TFile("/volatile/halla/solid/tianye/container/HallC_beamtest_bggen_LH2_pip_18deg_LD_21m_30degcut_poly/HallC_beamtest_bggen_LH2_pip_18deg_LD_21m_30degcut_poly_filenum200730_reduce_tree_rate_40uA_Npe_resolution_new.root");
-	TFile *f4 = new TFile("/volatile/halla/solid/tianye/container/HallC_beamtest_bggen_LH2_pim_18deg_LD_21m_30degcut_poly/HallC_beamtest_bggen_LH2_pim_18deg_LD_21m_30degcut_poly_filenum127210_reduce_tree_rate_40uA_Npe_resolution_new.root");
-        TFile *f3 = new TFile("/volatile/halla/solid/tianye/ecal_beamtest_hallc/18deg/GEMROOTFILE_narrow/beamtest_level1_4778_4779_10uA_pedestal_7files.root");
-	TFile *f13 = new TFile("/lustre19/expphy/volatile/halla/solid/tianye/ecal_beamtest_hallc/18deg/GEMROOTFILE_TS253_320ns/beamtest_level1_4770_4787.root");
-	TFile *f23 = new TFile("/lustre19/expphy/volatile/halla/solid/tianye/ecal_beamtest_hallc/18deg/GEMROOTFILE_narrow/beamtest_level1_4780_1.root");
-	TFile *f33 = new TFile("/lustre19/expphy/volatile/halla/solid/tianye/ecal_beamtest_hallc/18deg/GEMROOTFILE_T1020/beamtest_level1_4770_4787_nobeamtrip.root");
-        TFile *f7 = new TFile("/lustre19/expphy/volatile/halla/solid/tianye/container/HallC_beamtest_beamOntarget_60uA_sangle_4SC_18deg_LD2_r20m_shielding_30x30x2.54cm3_EMonly/HallC_beamtest_beamOntarget_60uA_sangle_4SC_18deg_LD2_r20m_shielding_30x30x2.54cm3_EMonly_filenum9482_9.482e9_reduce_tree_rate_resolution_10MeV_Eend.root");
-        TFile *f8 = new TFile("/lustre19/expphy/volatile/halla/solid/tianye/container/HallC_beamtest_bggen_LH2_pi0_18deg_LD_21m_30degcut_poly/HallC_beamtest_bggen_LH2_pi0_18deg_LD_21m_30degcut_poly_filenum169930_reduce_tree_rate_40uA_Npe_resolution_new.root");
-        TFile *f18 = new TFile("/lustre19/expphy/volatile/halla/solid/tianye/container/HallC_beamtest_eAll_1520deg_LD2_20m_30x30x2.5cm3_poly_beamline/HallC_beamtest_eAll_1520deg_LD2_20m_30x30x2.5cm3_poly_beamline_filenum9991_reduce_tree_rate_resolution_10MeV_test.root");
-
+	TFile *f2 = new TFile("/cache/halla/solid/sim/solid_gemc/ec_pro_JLAB_VERSION_2.5/pass1/18deg_reduce/HallC_beamtest_bggen_LH2_pip_18deg_LD_21m_30degcut_poly_filenum200730_reduce_tree_rate_40uA_Npe_resolution_new.root");
+	TFile *f4 = new TFile("/cache/halla/solid/sim/solid_gemc/ec_pro_JLAB_VERSION_2.5/pass1/18deg_reduce/HallC_beamtest_bggen_LH2_pim_18deg_LD_21m_30degcut_poly_filenum127210_reduce_tree_rate_40uA_Npe_resolution_new.root");
+        TFile *f3 = new TFile("/cache/halla/solid/user/tianye/ecal_beamtest_hallc/18deg/GEMROOTFILE_narrow/beamtest_level1_4778_4779_10uA_pedestal_7files.root");
+	TFile *f13 = new TFile("/cache/halla/solid/user/tianye/ecal_beamtest_hallc/18deg/GEMROOTFILE_TS253_320ns/beamtest_level1_4770_4787.root");
+	TFile *f23 = new TFile("/cache/halla/solid/user/tianye/ecal_beamtest_hallc/18deg/GEMROOTFILE_narrow/beamtest_level1_4780_1.root");
+	TFile *f33 = new TFile("/cache/halla/solid/user/tianye/ecal_beamtest_hallc/18deg/GEMROOTFILE_T1020/beamtest_level1_4770_4787_nobeamtrip.root");
+        TFile *f7 = new TFile("/cache/halla/solid/sim/solid_gemc/ec_pro_JLAB_VERSION_2.5/pass1/18deg_reduce/HallC_beamtest_beamOntarget_60uA_sangle_4SC_18deg_LD2_r20m_shielding_30x30x2.54cm3_EMonly_filenum9482_9.482e9_reduce_tree_rate_resolution_10MeV_Eend.root");
+        TFile *f8 = new TFile("/cache/halla/solid/sim/solid_gemc/ec_pro_JLAB_VERSION_2.5/pass1/18deg_reduce/HallC_beamtest_bggen_LH2_pi0_18deg_LD_21m_30degcut_poly_filenum169930_reduce_tree_rate_40uA_Npe_resolution_new.root");
+        TFile *f18 = new TFile("/cache/halla/solid/sim/solid_gemc/ec_pro_JLAB_VERSION_2.5/pass1/18deg_reduce/HallC_beamtest_eAll_1520deg_LD2_20m_30x30x2.5cm3_poly_beamline_filenum9991_reduce_tree_rate_resolution_10MeV_test.root");
 	TTree *tree_SC1_electron = (TTree*) f2->Get("T");
 	TTree *tree_pim = (TTree*) f4->Get("T");
 	TTree *tree_BT = (TTree*) f7->Get("T");
